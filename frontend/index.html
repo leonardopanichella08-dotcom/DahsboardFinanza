@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financial Simulation Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { indigo: '#6366f1', emerald: '#10b981', rose: '#f43f5e', amber: '#f59e0b' },
+            surface: { 900:'#0f172a', 800:'#1e293b', 700:'#334155', 600:'#475569', 400:'#94a3b8', 200:'#e2e8f0' }
+          },
+          fontFamily: { sans: ['Inter','system-ui','sans-serif'], mono: ['JetBrains Mono','monospace'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+    input[type=range] { -webkit-appearance: none; height: 4px; background: #334155; border-radius: 9999px; outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #6366f1; border-radius: 50%; cursor: pointer; }
+    .shimmer { background: linear-gradient(90deg, #334155 25%, #475569 50%, #334155 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+    @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+    .spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.3s ease; } @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+// ─── Recharts via ESM CDN ────────────────────────────────────────────────────
+import * as Recharts from 'https://esm.sh/recharts@2.12.7?bundle';
+const { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+        XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+        ResponsiveContainer } = Recharts;
+
+// ─── Tiny reactive store ─────────────────────────────────────────────────────
+const state = {
+  session: null,
+  resolvedValues: {},
+  overrides: {},
+  loading: false,
+  error: null,
+  selectedCell: null,
+  explanation: null,
+  explaining: false,
+  listeners: new Set(),
+};
+function setState(patch) {
+  Object.assign(state, typeof patch === 'function' ? patch(state) : patch);
+  state.listeners.forEach(fn => fn());
+}
+function subscribe(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
+
+// ─── Formatting helpers ───────────────────────────────────────────────────────
+function fmtVal(v, dataType, fmt) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'string') return v;
+  const n = Number(v); if (isNaN(n)) return String(v);
+  if (dataType === 'percentage' || fmt?.includes('%'))
+    return `${(Math.abs(n) <= 1 ? n * 100 : n).toFixed(1)}%`;
+  if (dataType === 'currency' || fmt?.includes('$') || fmt?.includes('€'))
+    return new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', maximumFractionDigits:0 }).format(n);
+  if (Math.abs(n) >= 1e6) return `${(n/1e6).toFixed(1)}M`;
+  if (Math.abs(n) >= 1e3) return `${(n/1e3).toFixed(1)}K`;
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+function valColor(v) {
+  const n = Number(v);
+  if (isNaN(n)) return '#94a3b8';
+  if (n > 0) return '#10b981';
+  if (n < 0) return '#f43f5e';
+  return '#94a3b8';
+}
+
+// ─── API calls ────────────────────────────────────────────────────────────────
+async function uploadExcel(file) {
+  const form = new FormData(); form.append('file', file);
+  const r = await fetch('/api/upload', { method:'POST', body:form });
+  if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail); }
+  return r.json();
+}
+async function runSimulation(sessionId, overrides) {
+  const r = await fetch('/api/simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id:sessionId, overrides}) });
+  if (!r.ok) throw new Error('Simulation failed');
+  return r.json();
+}
+async function explainCell(sessionId, cellId) {
+  const r = await fetch(`/api/explain/${sessionId}/${encodeURIComponent(cellId)}`);
+  if (!r.ok) throw new Error('Explanation failed');
+  return r.json();
+}
+
+// ─── UI helpers ──────────────────────────────────────────────────────────────
+function el(tag, props={}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(props)) {
+    if (k === 'className') e.className = v;
+    else if (k === 'style') Object.assign(e.style, v);
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'html') e.innerHTML = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null) continue;
+    e.append(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return e;
+}
+
+// ─── Components ──────────────────────────────────────────────────────────────
+
+function FileUploadSection(container) {
+  let dragging = false;
+
+  function render() {
+    container.innerHTML = '';
+    const { loading, error } = state;
+
+    const dropzone = el('button', {
+      className: `w-full rounded-lg border-2 border-dashed p-6 text-center transition-all ${dragging ? 'border-brand-indigo bg-indigo-500/10' : 'border-surface-700 hover:border-surface-600'}`,
+      style: { borderColor: dragging ? '#6366f1' : '#334155', background: dragging ? 'rgba(99,102,241,0.08)' : '' },
+      disabled: loading,
+    });
+
+    dropzone.innerHTML = loading
+      ? `<div class="flex flex-col items-center gap-2"><div class="h-7 w-7 rounded-full border-2 border-indigo-500 border-t-transparent spin mx-auto"></div><p class="text-xs text-surface-400 mt-1">Parsing…</p></div>`
+      : `<div class="flex flex-col items-center gap-2">
+           <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mx-auto" fill="none" viewBox="0 0 24 24" stroke="#475569" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M12 12V4m0 8l-3-3m3 3 3-3"/></svg>
+           <p class="text-sm font-medium text-surface-200">Drop Excel file</p>
+           <p class="text-xs text-surface-600">.xlsx · max 10 MB</p>
+         </div>`;
+
+    const input = el('input', { type:'file', accept:'.xlsx', style:{display:'none'} });
+    input.onchange = async (e) => { const f = e.target.files?.[0]; if (f) await doUpload(f); };
+
+    dropzone.onclick = () => input.click();
+    dropzone.ondragover = (e) => { e.preventDefault(); dragging=true; render(); };
+    dropzone.ondragleave = () => { dragging=false; render(); };
+    dropzone.ondrop = async (e) => { e.preventDefault(); dragging=false; const f = e.dataTransfer.files[0]; if (f) await doUpload(f); };
+
+    container.append(dropzone, input);
+
+    if (error) {
+      container.append(el('div', { className:'flex items-start gap-2 rounded-md p-3 text-xs mt-2', style:{background:'rgba(244,63,94,0.1)',color:'#f43f5e'} }, error));
+    }
+  }
+
+  async function doUpload(file) {
+    if (!file.name.endsWith('.xlsx')) { setState({error:'Only .xlsx files are supported'}); return; }
+    setState({loading:true, error:null});
+    try {
+      const session = await uploadExcel(file);
+      setState({session, resolvedValues: session.resolved_values, overrides:{}, loading:false});
+    } catch(e) {
+      setState({loading:false, error: e.message});
+    }
+  }
+
+  subscribe(render);
+  render();
+}
+
+function SidebarAI(container) {
+  function render() {
+    container.innerHTML = '';
+    const { selectedCell, explanation, explaining } = state;
+
+    if (!selectedCell && !explaining) {
+      container.append(el('div', { className:'flex flex-col items-center gap-3 rounded-lg p-5 text-center', style:{background:'#1e293b'} },
+        el('div', { className:'flex h-10 w-10 items-center justify-center rounded-full mx-auto', style:{background:'rgba(99,102,241,0.2)'} },
+          el('svg', { xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#6366f1', 'stroke-width':'1.5', class:'h-5 w-5', html:'<path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.8 1.8M5 14.5l-1.8 1.8M5 14.5h14.8M5 14.5v4.5a1.5 1.5 0 001.5 1.5h11a1.5 1.5 0 001.5-1.5V14.5"/>'})),
+        el('p', {className:'text-sm font-medium text-surface-200'}, 'Ask the Assistant'),
+        el('p', {className:'text-xs text-surface-600'}, 'Click any KPI card or formula row to get a plain-English explanation.')
+      ));
+      return;
+    }
+
+    const card = el('div', {className:'rounded-lg overflow-hidden', style:{border:'1px solid #334155', background:'#1e293b'}});
+    const header = el('div', {className:'flex items-center justify-between px-4 py-3', style:{borderBottom:'1px solid #334155'}},
+      el('span', {className:'text-sm font-semibold text-surface-200'}, selectedCell?.label ?? '…'),
+      el('button', {className:'text-surface-600 hover:text-surface-400 text-lg leading-none', onClick:()=>setState({selectedCell:null,explanation:null})}, '×')
+    );
+    card.append(header);
+
+    const body = el('div', {className:'p-4 space-y-4'});
+    if (explaining) {
+      [80,60,90].forEach(w => body.append(el('div', {className:'h-3 rounded shimmer', style:{width:`${w}%`}})));
+    } else if (explanation) {
+      [
+        ['What it means', explanation.what_it_means],
+        ['Business impact', explanation.business_impact],
+        ['Sensitivity', explanation.sensitivity],
+      ].forEach(([title, text]) => {
+        if (!text) return;
+        body.append(
+          el('div', {className:'space-y-1'},
+            el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, title),
+            el('p', {className:'text-xs leading-relaxed', style:{color:'#94a3b8'}}, text)
+          )
+        );
+      });
+    }
+    card.append(body);
+    container.append(card);
+  }
+
+  subscribe(render); render();
+}
+
+function buildSidebar() {
+  const sidebar = el('aside', {
+    className:'flex h-full shrink-0 flex-col gap-5 p-4',
+    style:{width:'260px', borderRight:'1px solid #334155', background:'#0f172a', overflowY:'auto'}
+  });
+
+  // Logo
+  sidebar.append(el('div', {className:'flex items-center gap-2.5 px-1 py-2'},
+    el('div', {className:'flex h-7 w-7 items-center justify-center rounded-lg', style:{background:'#6366f1'}},
+      el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'white', 'stroke-width':'2', style:{width:'16px',height:'16px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>'})),
+    el('span', {className:'text-sm font-bold tracking-tight', style:{color:'#e2e8f0'}}, 'FinSim')
+  ));
+
+  sidebar.append(el('div', {style:{height:'1px', background:'#334155'}}));
+
+  // File section
+  const fileSection = el('div', {className:'space-y-2'});
+  fileSection.append(el('p', {className:'px-1 text-xs font-semibold uppercase tracking-widest', style:{color:'#475569'}}, 'Data Source'));
+  const fileContainer = el('div');
+  fileSection.append(fileContainer);
+  sidebar.append(fileSection);
+
+  // Render file state reactively
+  function renderFileState() {
+    fileContainer.innerHTML = '';
+    const { session } = state;
+    if (session) {
+      fileContainer.append(
+        el('div', {className:'flex items-center gap-2 rounded-lg px-3 py-2.5', style:{background:'#1e293b'}},
+          el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#10b981', 'stroke-width':'1.5', style:{width:'16px',height:'16px',flexShrink:'0'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/>'}),
+          el('span', {className:'text-xs truncate', style:{color:'#94a3b8'}}, session.filename)
+        ),
+        el('button', {
+          className:'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:opacity-80',
+          style:{color:'#475569'},
+          onClick:() => setState({session:null, resolvedValues:{}, overrides:{}, error:null, selectedCell:null, explanation:null})
+        }, '↺  Load new file')
+      );
+    } else {
+      FileUploadSection(fileContainer);
+    }
+  }
+  subscribe(renderFileState); renderFileState();
+
+  sidebar.append(el('div', {style:{height:'1px', background:'#334155'}}));
+
+  // AI Assistant
+  const aiSection = el('div', {className:'space-y-2', style:{flex:'1'}});
+  aiSection.append(el('p', {className:'px-1 text-xs font-semibold uppercase tracking-widest', style:{color:'#475569'}}, 'AI Assistant'));
+  const aiContainer = el('div');
+  aiSection.append(aiContainer);
+  SidebarAI(aiContainer);
+  sidebar.append(aiSection);
+
+  sidebar.append(el('p', {className:'text-xs px-1', style:{color:'#334155'}}, 'Powered by Claude · FinSim v1.0'));
+
+  return sidebar;
+}
+
+// ─── KPI Card ─────────────────────────────────────────────────────────────────
+function KPICard(cell, synthetic) {
+  const label  = cell?.label ?? synthetic?.label ?? '';
+  const rawVal = cell ? (state.resolvedValues[cell.id] ?? cell.value) : synthetic?.value;
+  const display = fmtVal(rawVal, cell?.data_type, cell?.format_string);
+  const color  = valColor(rawVal);
+  const isAI   = synthetic?.is_ai_generated;
+
+  const card = el('button', {
+    className:'group relative rounded-xl border text-left transition-all p-4 w-full fade-in',
+    style:{background:'#1e293b', border:'1px solid #334155', cursor: cell ? 'pointer' : 'default'}
+  });
+
+  if (isAI) {
+    card.append(el('span', {
+      className:'absolute right-3 top-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+      style:{background:'rgba(99,102,241,0.2)', color:'#6366f1', fontSize:'10px'}
+    }, '✦ AI'));
+  }
+
+  card.append(el('p', {className:'text-xs truncate pr-8', style:{color:'#475569'}}, label));
+  card.append(el('p', {className:'mt-1.5 font-mono text-xl font-bold tracking-tight', style:{color, fontFamily:'JetBrains Mono, monospace'}}, display));
+
+  if (synthetic) {
+    card.append(el('p', {className:'mt-2 text-xs leading-relaxed', style:{color:'#475569', fontSize:'10px', overflow:'hidden', display:'-webkit-box', WebkitLineClamp:'2', WebkitBoxOrient:'vertical'}}, synthetic.formula_used));
+  }
+
+  if (cell) {
+    card.onmouseenter = () => { card.style.borderColor = 'rgba(99,102,241,0.5)'; card.style.background = 'rgba(51,65,85,0.5)'; };
+    card.onmouseleave = () => { card.style.borderColor = '#334155'; card.style.background = '#1e293b'; };
+    card.onclick = async () => {
+      setState({ selectedCell: cell, explanation: null, explaining: true });
+      try {
+        const exp = await explainCell(state.session.session_id, cell.id);
+        setState({ explanation: exp, explaining: false });
+      } catch {
+        setState({ explanation: { cell_id: cell.id, what_it_means: 'Could not fetch explanation — is the backend running?', business_impact:'', sensitivity:'' }, explaining: false });
+      }
+    };
+  }
+
+  return card;
+}
+
+// ─── Input Slider ─────────────────────────────────────────────────────────────
+function InputSliderCard(cell) {
+  const base = Number(cell.value) || 1;
+  const min  = base < 0 ? base * 4 : 0;
+  const max  = base < 0 ? 0 : base * 4 || 1000;
+  const step = Math.max(1, Math.abs(base) / 1000);
+
+  function currentVal() { return Number(state.overrides[cell.id] ?? state.resolvedValues[cell.id] ?? cell.value ?? 0); }
+
+  const wrapper = el('div', {className:'rounded-lg border p-3.5 space-y-2.5 transition-colors', style:{background:'#1e293b', border:'1px solid #334155'}});
+
+  const topRow = el('div', {className:'flex items-center justify-between'});
+  const lbl = el('button', {className:'text-xs font-medium text-left transition-colors', style:{color:'#94a3b8'}}, cell.label);
+  lbl.onmouseenter = () => lbl.style.color = '#e2e8f0';
+  lbl.onmouseleave = () => lbl.style.color = '#94a3b8';
+  const valSpan = el('span', {className:'font-mono text-sm font-semibold', style:{color: valColor(currentVal()), fontFamily:'JetBrains Mono, monospace'}}, fmtVal(currentVal(), cell.data_type, cell.format_string));
+  topRow.append(lbl, valSpan);
+
+  const numInput = el('input', {type:'number', value: currentVal(), className:'w-full rounded px-2.5 py-1.5 font-mono text-xs', style:{background:'#0f172a', border:'1px solid #334155', color:'#e2e8f0', fontFamily:'JetBrains Mono, monospace', outline:'none'}});
+  numInput.onfocus = () => numInput.style.borderColor = '#6366f1';
+  numInput.onblur = () => { numInput.style.borderColor = '#334155'; commit(numInput.value); };
+  numInput.onkeydown = e => { if (e.key === 'Enter') commit(numInput.value); };
+
+  const slider = el('input', {type:'range', min, max, step, value: currentVal()});
+
+  async function commit(raw) {
+    const n = parseFloat(raw); if (isNaN(n)) return;
+    setState(s => ({overrides: {...s.overrides, [cell.id]: n}}));
+    valSpan.textContent = fmtVal(n, cell.data_type, cell.format_string);
+    valSpan.style.color = valColor(n);
+    if (!state.session) return;
+    try {
+      const result = await runSimulation(state.session.session_id, {...state.overrides, [cell.id]: n});
+      setState({resolvedValues: result.values});
+    } catch { /* silent */ }
+  }
+
+  slider.oninput = e => { numInput.value = e.target.value; commit(e.target.value); };
+
+  wrapper.append(topRow, numInput, slider);
+  return wrapper;
+}
+
+// ─── Charts via Recharts ──────────────────────────────────────────────────────
+function renderCharts(container) {
+  container.innerHTML = '';
+  const { session, resolvedValues } = state;
+  if (!session) return;
+
+  // Build cashflow data from column sums
+  const byCol = {};
+  session.cells.forEach(c => {
+    if (c.type === 'label') return;
+    const v = Number(resolvedValues[c.id] ?? c.value ?? 0);
+    if (!isNaN(v)) byCol[c.col] = (byCol[c.col]||0) + v;
+  });
+  const cashData = Object.entries(byCol).sort(([a],[b])=>+a - +b).slice(0,16).map(([,v],i)=>({period:`P${i+1}`,value:v}));
+
+  // Revenue/cost cells
+  const revKw = ['revenue','sales','income','ricavi'];
+  const costKw = ['cost','expense','spesa','costo','burn'];
+  const revCells = session.cells.filter(c => c.type!=='label' && revKw.some(k=>c.label.toLowerCase().includes(k)) && !isNaN(Number(resolvedValues[c.id]??c.value)));
+  const costCells = session.cells.filter(c => c.type!=='label' && costKw.some(k=>c.label.toLowerCase().includes(k)) && !isNaN(Number(resolvedValues[c.id]??c.value)));
+
+  const allLbls = [...new Set([...revCells.map(c=>c.label),...costCells.map(c=>c.label)])].slice(0,8);
+  const rvData = allLbls.length ? allLbls.map(lbl=>{
+    const rc = revCells.find(c=>c.label===lbl);
+    const cc = costCells.find(c=>c.label===lbl);
+    return { name: lbl.length>12?lbl.slice(0,12)+'…':lbl, Revenue: rc?Math.abs(Number(resolvedValues[rc.id]??rc.value??0)):0, Costs: cc?Math.abs(Number(resolvedValues[cc.id]??cc.value??0)):0 };
+  }) : null;
+
+  // Pie data
+  const pieData = session.cells.filter(c=>c.type==='static'&&Number(resolvedValues[c.id]??c.value)>0).map(c=>({name:c.label.slice(0,16),value:Number(resolvedValues[c.id]??c.value??0)})).sort((a,b)=>b.value-a.value).slice(0,6);
+  const PIE_COLORS = ['#6366f1','#10b981','#f59e0b','#f43f5e','#06b6d4','#8b5cf6'];
+
+  const grid = el('div', {className:'grid gap-4', style:{gridTemplateColumns:'repeat(auto-fit, minmax(340px,1fr))'}});
+
+  // Cashflow area chart
+  if (cashData.length > 1) {
+    const div = el('div', {className:'rounded-xl border p-4 space-y-3', style:{background:'#1e293b', border:'1px solid #334155'}});
+    div.append(el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Cumulative Value by Period'));
+    const chartDiv = el('div', {style:{height:'180px'}});
+    div.append(chartDiv); grid.append(div);
+
+    // React-free Recharts rendering
+    import('https://esm.sh/react@18?bundle').then(React => {
+      import('https://esm.sh/react-dom@18/client?bundle').then(RD => {
+        const root = RD.createRoot(chartDiv);
+        root.render(React.createElement(ResponsiveContainer, {width:'100%',height:180},
+          React.createElement(AreaChart, {data:cashData, margin:{top:4,right:8,left:0,bottom:0}},
+            React.createElement('defs', null,
+              React.createElement('linearGradient', {id:'grad',x1:'0',y1:'0',x2:'0',y2:'1'},
+                React.createElement('stop', {offset:'5%',stopColor:'#6366f1',stopOpacity:0.3}),
+                React.createElement('stop', {offset:'95%',stopColor:'#6366f1',stopOpacity:0})
+              )
+            ),
+            React.createElement(CartesianGrid, {strokeDasharray:'3 3',stroke:'#334155'}),
+            React.createElement(XAxis, {dataKey:'period',tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false}),
+            React.createElement(YAxis, {tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false,tickFormatter:v=>fmtVal(v,'number')}),
+            React.createElement(Tooltip, {contentStyle:{background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:12},labelStyle:{color:'#94a3b8'}}),
+            React.createElement(Area, {type:'monotone',dataKey:'value',stroke:'#6366f1',strokeWidth:2,fill:'url(#grad)'})
+          )
+        ));
+      });
+    });
+  }
+
+  // Revenue bar chart
+  if (rvData && rvData.length > 0) {
+    const div = el('div', {className:'rounded-xl border p-4 space-y-3', style:{background:'#1e293b', border:'1px solid #334155'}});
+    div.append(el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Revenue vs Costs'));
+    const chartDiv = el('div', {style:{height:'180px'}});
+    div.append(chartDiv); grid.append(div);
+
+    import('https://esm.sh/react@18?bundle').then(React => {
+      import('https://esm.sh/react-dom@18/client?bundle').then(RD => {
+        RD.createRoot(chartDiv).render(React.createElement(ResponsiveContainer,{width:'100%',height:180},
+          React.createElement(BarChart,{data:rvData,margin:{top:4,right:8,left:0,bottom:0}},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#334155'}),
+            React.createElement(XAxis,{dataKey:'name',tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false}),
+            React.createElement(YAxis,{tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false,tickFormatter:v=>fmtVal(v,'number')}),
+            React.createElement(Tooltip,{contentStyle:{background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:12}}),
+            React.createElement(Legend,{wrapperStyle:{fontSize:11,color:'#94a3b8'}}),
+            React.createElement(Bar,{dataKey:'Revenue',fill:'#10b981',radius:[4,4,0,0]}),
+            React.createElement(Bar,{dataKey:'Costs',fill:'#f43f5e',radius:[4,4,0,0]})
+          )
+        ));
+      });
+    });
+  }
+
+  // Pie chart
+  if (pieData.length >= 2) {
+    const div = el('div', {className:'rounded-xl border p-4 space-y-3', style:{background:'#1e293b', border:'1px solid #334155'}});
+    div.append(el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Budget Allocation'));
+    const inner = el('div', {className:'flex items-center gap-4'});
+    const chartDiv = el('div', {style:{height:'140px', width:'50%', flexShrink:'0'}});
+    const legend = el('ul', {className:'space-y-1.5 flex-1'});
+    pieData.forEach((s,i) => legend.append(
+      el('li', {className:'flex items-center gap-2 text-xs', style:{color:'#94a3b8'}},
+        el('span', {className:'inline-block h-2 w-2 rounded-full shrink-0', style:{background:PIE_COLORS[i%PIE_COLORS.length]}}),
+        el('span', {style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, s.name)
+      )
+    ));
+    inner.append(chartDiv, legend);
+    div.append(inner); grid.append(div);
+
+    import('https://esm.sh/react@18?bundle').then(React => {
+      import('https://esm.sh/react-dom@18/client?bundle').then(RD => {
+        RD.createRoot(chartDiv).render(React.createElement(ResponsiveContainer,{width:'100%',height:140},
+          React.createElement(PieChart,null,
+            React.createElement(Pie,{data:pieData,cx:'50%',cy:'50%',innerRadius:36,outerRadius:58,dataKey:'value',strokeWidth:0},
+              ...pieData.map((_,i)=>React.createElement(Cell,{key:i,fill:PIE_COLORS[i%PIE_COLORS.length]}))
+            ),
+            React.createElement(Tooltip,{contentStyle:{background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:12},formatter:v=>[fmtVal(v,'number'),'']})
+          )
+        ));
+      });
+    });
+  }
+
+  container.append(grid);
+}
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
+function buildDashboard(container) {
+  function render() {
+    container.innerHTML = '';
+    const { session, resolvedValues } = state;
+
+    if (!session) {
+      container.append(el('div', {className:'flex h-full flex-col items-center justify-center gap-5 p-8 text-center', style:{minHeight:'100vh'}},
+        el('div', {className:'flex h-16 w-16 items-center justify-center rounded-2xl mx-auto', style:{background:'#1e293b', border:'1px solid #334155'}},
+          el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#475569', 'stroke-width':'1.5', style:{width:'32px',height:'32px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z">'})
+        ),
+        el('div', {className:'space-y-2 max-w-sm'},
+          el('h1', {className:'text-xl font-bold', style:{color:'#e2e8f0'}}, 'Financial Simulation Dashboard'),
+          el('p', {className:'text-sm leading-relaxed', style:{color:'#475569'}}, 'Upload an Excel financial model to get interactive sliders, real-time KPI recalculation, AI-generated metrics, and plain-English explanations.')
+        ),
+        el('div', {className:'flex gap-4 text-xs', style:{color:'#334155'}},
+          el('span', {}, 'What-If Analysis'), el('span',{},'·'), el('span',{},'Formula Breakdown'), el('span',{},'·'), el('span',{},'AI Glossary')
+        )
+      ));
+      return;
+    }
+
+    const wrap = el('div', {className:'p-6 space-y-8'});
+
+    // Header
+    const header = el('div', {className:'flex items-center justify-between'});
+    header.append(
+      el('div', {},
+        el('h1', {className:'text-lg font-bold', style:{color:'#e2e8f0'}}, session.filename),
+        el('p', {className:'text-xs mt-0.5', style:{color:'#475569'}}, `${session.static_cells.length} inputs · ${session.calculated_cells.length} formulas · ${session.sheets.join(', ')}`)
+      )
+    );
+    if (session.synthetic_metrics.length > 0) {
+      header.append(el('span', {className:'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium', style:{background:'rgba(99,102,241,0.2)',color:'#6366f1'}}, `✦ ${session.synthetic_metrics.length} AI metrics generated`));
+    }
+    wrap.append(header);
+
+    // KPI grid
+    const kpiCells = session.cells.filter(c => (c.type==='calculated'||c.type==='static') && c.data_type!=='text').slice(0,8);
+    if (kpiCells.length || session.synthetic_metrics.length) {
+      const sec = el('div', {className:'space-y-3'});
+      sec.append(el('h2', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Financial Performance'));
+      const grid = el('div', {className:'grid gap-3', style:{gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))'}});
+      kpiCells.forEach(c => grid.append(KPICard(c, null)));
+      session.synthetic_metrics.forEach(m => grid.append(KPICard(null, m)));
+      sec.append(grid); wrap.append(sec);
+    }
+
+    // Charts
+    const chartsSection = el('div', {className:'space-y-3'});
+    chartsSection.append(el('h2', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Visualizations'));
+    const chartsContainer = el('div');
+    chartsSection.append(chartsContainer);
+    wrap.append(chartsSection);
+    setTimeout(() => renderCharts(chartsContainer), 0);
+
+    // Control Center
+    const staticCells = session.cells.filter(c => c.type==='static' && session.static_cells.includes(c.id) && !isNaN(Number(resolvedValues[c.id]??c.value)));
+    if (staticCells.length) {
+      const sec = el('div', {className:'space-y-3'});
+      const hdr = el('div', {className:'flex items-center gap-2'},
+        el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#6366f1', 'stroke-width':'1.5', style:{width:'16px',height:'16px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"/>'}),
+        el('h2', {className:'text-sm font-semibold', style:{color:'#e2e8f0'}}, 'Control Center'),
+        el('span', {className:'ml-auto rounded-full px-2 py-0.5 text-xs', style:{background:'#334155',color:'#94a3b8'}}, `${staticCells.length} inputs`)
+      );
+      sec.append(hdr);
+      const grid = el('div', {className:'grid gap-2.5', style:{gridTemplateColumns:'repeat(auto-fill, minmax(280px,1fr))'}});
+      staticCells.forEach(c => grid.append(InputSliderCard(c)));
+      sec.append(grid); wrap.append(sec);
+    }
+
+    // Formula Table
+    const formulaCells = session.cells.filter(c => c.type==='calculated' && c.formula);
+    if (formulaCells.length) {
+      const sec = el('div', {className:'space-y-3'});
+      sec.append(el('div', {className:'flex items-center gap-2'},
+        el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#f59e0b', 'stroke-width':'1.5', style:{width:'16px',height:'16px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/>'}),
+        el('h2', {className:'text-sm font-semibold', style:{color:'#e2e8f0'}}, 'Formula Breakdown'),
+        el('span', {className:'ml-auto rounded-full px-2 py-0.5 text-xs', style:{background:'#334155',color:'#94a3b8'}}, `${formulaCells.length} formulas`)
+      ));
+      const tableWrap = el('div', {className:'rounded-xl overflow-hidden', style:{border:'1px solid #334155', background:'#1e293b'}});
+      const table = el('table', {style:{width:'100%', fontSize:'12px', borderCollapse:'collapse'}});
+      table.append(el('thead', {},
+        el('tr', {style:{borderBottom:'1px solid #334155'}},
+          ...['Cell','Label','Formula','Value'].map((h,i) => el('th', {className:'px-4 py-2.5 font-semibold', style:{textAlign: i===3?'right':'left', color:'#475569'}}, h))
+        )
+      ));
+      const tbody = el('tbody');
+      formulaCells.forEach((cell,i) => {
+        const val = resolvedValues[cell.id] ?? cell.value;
+        const tr = el('tr', {
+          style:{borderBottom:'1px solid rgba(51,65,85,0.5)', background: i%2===0?'transparent':'rgba(30,41,59,0.5)', cursor:'pointer'}
+        },
+          el('td', {className:'px-4 py-2.5 font-mono', style:{color:'#475569'}}, cell.id.split('!')[1]),
+          el('td', {className:'px-4 py-2.5', style:{color:'#94a3b8', maxWidth:'140px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, cell.label),
+          el('td', {className:'px-4 py-2.5 font-mono', style:{color:'#f59e0b', maxWidth:'200px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, cell.formula?.raw),
+          el('td', {className:'px-4 py-2.5 text-right font-mono font-semibold', style:{color: valColor(val)}}, fmtVal(val, cell.data_type, cell.format_string))
+        );
+        tr.onmouseenter = () => tr.style.background = 'rgba(51,65,85,0.4)';
+        tr.onmouseleave = () => tr.style.background = i%2===0?'transparent':'rgba(30,41,59,0.5)';
+        tr.onclick = async () => {
+          setState({ selectedCell: cell, explanation: null, explaining: true });
+          try {
+            const exp = await explainCell(state.session.session_id, cell.id);
+            setState({ explanation: exp, explaining: false });
+          } catch {
+            setState({ explanation: { cell_id: cell.id, what_it_means: 'Backend not reachable — start the FastAPI server.', business_impact:'', sensitivity:'' }, explaining: false });
+          }
+        };
+        tbody.append(tr);
+      });
+      table.append(tbody);
+      tableWrap.append(table);
+      sec.append(tableWrap); wrap.append(sec);
+    }
+
+    container.append(wrap);
+  }
+
+  subscribe(render); render();
+}
+
+// ─── Bootstrap ────────────────────────────────────────────────────────────────
+const app = document.getElementById('app');
+app.style.cssText = 'display:flex; height:100vh; overflow:hidden;';
+
+const sidebar = buildSidebar();
+const mainArea = el('main', {style:{flex:'1', overflowY:'auto'}});
+
+app.append(sidebar, mainArea);
+buildDashboard(mainArea);
+</script>
+</body>
+</html>

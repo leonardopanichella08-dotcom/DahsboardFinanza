@@ -10,9 +10,11 @@ app = FastAPI(
     description="Parses Excel financial models, runs what-if simulations, and explains metrics via Claude.",
 )
 
+_origins = ["*"] if settings.DEV_MODE else settings.origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.origins,
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

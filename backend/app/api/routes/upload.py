@@ -13,10 +13,11 @@ _MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 @router.post("")
 async def upload_excel(file: UploadFile):
-    if not file.filename or not file.filename.endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+    if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Il file deve essere un Excel (.xlsx o .xls)")
 
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+    suffix = ".xls" if file.filename.endswith(".xls") else ".xlsx"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = Path(tmp.name)
         content = await file.read()
         if len(content) > _MAX_BYTES:

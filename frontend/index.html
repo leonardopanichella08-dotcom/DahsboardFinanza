@@ -1,619 +1,902 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Financial Simulation Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <title>Architetto Gestionale – Cruscotto Finanziario</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: { indigo: '#6366f1', emerald: '#10b981', rose: '#f43f5e', amber: '#f59e0b' },
-            surface: { 900:'#0f172a', 800:'#1e293b', 700:'#334155', 600:'#475569', 400:'#94a3b8', 200:'#e2e8f0' }
-          },
-          fontFamily: { sans: ['Inter','system-ui','sans-serif'], mono: ['JetBrains Mono','monospace'] }
-        }
-      }
-    }
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-    ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
-    input[type=range] { -webkit-appearance: none; height: 4px; background: #334155; border-radius: 9999px; outline: none; cursor: pointer; }
-    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #6366f1; border-radius: 50%; cursor: pointer; }
-    .shimmer { background: linear-gradient(90deg, #334155 25%, #475569 50%, #334155 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
-    @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
-    .spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
-    .fade-in { animation: fadeIn 0.3s ease; } @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0a0f1e;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1e293b;border-radius:9px}
+    input[type=range]{-webkit-appearance:none;width:100%;height:3px;background:#1e293b;border-radius:9px;outline:none;cursor:pointer}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;background:#6366f1;border-radius:50%;cursor:pointer;box-shadow:0 0 0 3px rgba(99,102,241,.2)}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    .shimmer{background:linear-gradient(90deg,#1e293b 25%,#334155 50%,#1e293b 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:6px}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    .fade-in{animation:fadeIn .3s ease}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{animation:spin 1s linear infinite}
+    .card{background:#0f172a;border:1px solid #1e293b;border-radius:14px}
+    .card-hover{transition:border-color .2s,box-shadow .2s;cursor:pointer}
+    .card-hover:hover{border-color:#6366f1;box-shadow:0 0 0 1px rgba(99,102,241,.3),0 8px 24px rgba(99,102,241,.1)}
+    .btn{cursor:pointer;border:none;outline:none;background:transparent}
+    .tag{display:inline-flex;align-items:center;gap:4px;border-radius:9999px;font-size:11px;font-weight:600;padding:3px 10px}
+    .kpi-positive{color:#10b981}
+    .kpi-negative{color:#f43f5e}
+    .kpi-neutral{color:#94a3b8}
+    .section-title{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#475569;margin-bottom:12px}
+    table{border-collapse:collapse;width:100%}
+    td,th{padding:10px 14px;text-align:left}
+    .gradient-text{background:linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .pulse{animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+    .chip{display:inline-flex;align-items:center;gap:6px;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:4px 10px;font-size:11px;color:#94a3b8;font-weight:500}
   </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app" style="display:flex;height:100vh;overflow:hidden"></div>
 
-<script type="module">
-// ─── Recharts via ESM CDN ────────────────────────────────────────────────────
-import * as Recharts from 'https://esm.sh/recharts@2.12.7?bundle';
-const { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-        XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-        ResponsiveContainer } = Recharts;
-
-// ─── Tiny reactive store ─────────────────────────────────────────────────────
-const state = {
-  session: null,
-  resolvedValues: {},
-  overrides: {},
-  loading: false,
-  error: null,
-  selectedCell: null,
-  explanation: null,
-  explaining: false,
-  listeners: new Set(),
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+const S = {
+  session:null, values:{}, overrides:{},
+  loading:false, error:null,
+  baselineKpis:null,   // kpis at load time for delta comparison
+  _subs:[],
+  set(p){Object.assign(this,p);this._subs.forEach(f=>f());},
+  sub(f){this._subs.push(f);}
 };
-function setState(patch) {
-  Object.assign(state, typeof patch === 'function' ? patch(state) : patch);
-  state.listeners.forEach(fn => fn());
-}
-function subscribe(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
 
-// ─── Formatting helpers ───────────────────────────────────────────────────────
-function fmtVal(v, dataType, fmt) {
-  if (v === null || v === undefined) return '—';
-  if (typeof v === 'string') return v;
-  const n = Number(v); if (isNaN(n)) return String(v);
-  if (dataType === 'percentage' || fmt?.includes('%'))
-    return `${(Math.abs(n) <= 1 ? n * 100 : n).toFixed(1)}%`;
-  if (dataType === 'currency' || fmt?.includes('$') || fmt?.includes('€'))
-    return new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', maximumFractionDigits:0 }).format(n);
-  if (Math.abs(n) >= 1e6) return `${(n/1e6).toFixed(1)}M`;
-  if (Math.abs(n) >= 1e3) return `${(n/1e3).toFixed(1)}K`;
-  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+// ─────────────────────────────────────────────────────────────────────────────
+// API
+// ─────────────────────────────────────────────────────────────────────────────
+async function apiUpload(file){
+  const fd=new FormData(); fd.append('file',file);
+  const r=await fetch('/api/upload',{method:'POST',body:fd});
+  const data=await r.json().catch(()=>null);
+  if(!r.ok||data?.detail) throw new Error(data?.detail??r.statusText);
+  return data;
 }
-function valColor(v) {
-  const n = Number(v);
-  if (isNaN(n)) return '#94a3b8';
-  if (n > 0) return '#10b981';
-  if (n < 0) return '#f43f5e';
-  return '#94a3b8';
-}
-
-// ─── API calls ────────────────────────────────────────────────────────────────
-async function uploadExcel(file) {
-  const form = new FormData(); form.append('file', file);
-  const r = await fetch('/api/upload', { method:'POST', body:form });
-  if (!r.ok) { const e = await r.json().catch(()=>({detail:r.statusText})); throw new Error(e.detail); }
-  return r.json();
-}
-async function runSimulation(sessionId, overrides) {
-  const r = await fetch('/api/simulate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id:sessionId, overrides}) });
-  if (!r.ok) throw new Error('Simulation failed');
-  return r.json();
-}
-async function explainCell(sessionId, cellId) {
-  const r = await fetch(`/api/explain/${sessionId}/${encodeURIComponent(cellId)}`);
-  if (!r.ok) throw new Error('Explanation failed');
+async function apiSimulate(sid,overrides){
+  const r=await fetch('/api/simulate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:sid,overrides})});
+  if(!r.ok) throw new Error('Simulazione fallita');
   return r.json();
 }
 
-// ─── UI helpers ──────────────────────────────────────────────────────────────
-function el(tag, props={}, ...children) {
-  const e = document.createElement(tag);
-  for (const [k,v] of Object.entries(props)) {
-    if (k === 'className') e.className = v;
-    else if (k === 'style') Object.assign(e.style, v);
-    else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === 'html') e.innerHTML = v;
-    else e.setAttribute(k, v);
+// ─────────────────────────────────────────────────────────────────────────────
+// Format helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function fmtEur(v){
+  if(v==null||isNaN(v)) return '—';
+  const n=Number(v);
+  if(Math.abs(n)>=1e6) return `€${(n/1e6).toFixed(2)}M`;
+  if(Math.abs(n)>=1e3) return `€${(n/1e3).toFixed(1)}K`;
+  return new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n);
+}
+function fmtNum(v,unit){
+  if(v==null||isNaN(Number(v))) return '—';
+  const n=Number(v);
+  if(unit==='%') return `${n.toFixed(1)}%`;
+  if(unit==='mesi') return `${n.toFixed(1)} mesi`;
+  if(unit==='x') return `${n.toFixed(2)}x`;
+  if(unit==='€') return fmtEur(n);
+  if(Math.abs(n)>=1e6) return `${(n/1e6).toFixed(1)}M`;
+  if(Math.abs(n)>=1e3) return `${(n/1e3).toFixed(1)}K`;
+  return n.toLocaleString('it-IT',{maximumFractionDigits:1});
+}
+function deltaColor(d){ return d>0?'#10b981':d<0?'#f43f5e':'#475569'; }
+function deltaArrow(d){ return d>0?'▲':d<0?'▼':''; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOM helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function h(tag,attrs={},...kids){
+  const e=document.createElement(tag);
+  for(const [k,v] of Object.entries(attrs)){
+    if(k==='class') e.className=v;
+    else if(k==='style'&&typeof v==='object') Object.assign(e.style,v);
+    else if(k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(),v);
+    else if(k==='html') e.innerHTML=v;
+    else e.setAttribute(k,v);
   }
-  for (const c of children.flat()) {
-    if (c == null) continue;
-    e.append(typeof c === 'string' ? document.createTextNode(c) : c);
-  }
+  kids.flat().forEach(c=>c!=null&&e.append(typeof c==='string'?document.createTextNode(c):c));
   return e;
 }
+function svgIcon(d,color='#94a3b8',sz=16){
+  const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  s.setAttribute('viewBox','0 0 24 24');s.setAttribute('fill','none');
+  s.setAttribute('stroke',color);s.setAttribute('stroke-width','1.5');
+  s.style.cssText=`width:${sz}px;height:${sz}px;flex-shrink:0`;
+  s.innerHTML=d;return s;
+}
 
-// ─── Components ──────────────────────────────────────────────────────────────
-
-function FileUploadSection(container) {
-  let dragging = false;
-
-  function render() {
-    container.innerHTML = '';
-    const { loading, error } = state;
-
-    const dropzone = el('button', {
-      className: `w-full rounded-lg border-2 border-dashed p-6 text-center transition-all ${dragging ? 'border-brand-indigo bg-indigo-500/10' : 'border-surface-700 hover:border-surface-600'}`,
-      style: { borderColor: dragging ? '#6366f1' : '#334155', background: dragging ? 'rgba(99,102,241,0.08)' : '' },
-      disabled: loading,
+// ─────────────────────────────────────────────────────────────────────────────
+// Upload handler
+// ─────────────────────────────────────────────────────────────────────────────
+async function doUpload(file){
+  S.set({loading:true,error:null});
+  try{
+    const data=await apiUpload(file);
+    S.set({
+      session:data,
+      values:data.resolved_values||{},
+      overrides:{},
+      baselineKpis:data.business_kpis||[],
+      loading:false
     });
-
-    dropzone.innerHTML = loading
-      ? `<div class="flex flex-col items-center gap-2"><div class="h-7 w-7 rounded-full border-2 border-indigo-500 border-t-transparent spin mx-auto"></div><p class="text-xs text-surface-400 mt-1">Parsing…</p></div>`
-      : `<div class="flex flex-col items-center gap-2">
-           <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mx-auto" fill="none" viewBox="0 0 24 24" stroke="#475569" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M12 12V4m0 8l-3-3m3 3 3-3"/></svg>
-           <p class="text-sm font-medium text-surface-200">Drop Excel file</p>
-           <p class="text-xs text-surface-600">.xlsx · max 10 MB</p>
-         </div>`;
-
-    const input = el('input', { type:'file', accept:'.xlsx', style:{display:'none'} });
-    input.onchange = async (e) => { const f = e.target.files?.[0]; if (f) await doUpload(f); };
-
-    dropzone.onclick = () => input.click();
-    dropzone.ondragover = (e) => { e.preventDefault(); dragging=true; render(); };
-    dropzone.ondragleave = () => { dragging=false; render(); };
-    dropzone.ondrop = async (e) => { e.preventDefault(); dragging=false; const f = e.dataTransfer.files[0]; if (f) await doUpload(f); };
-
-    container.append(dropzone, input);
-
-    if (error) {
-      container.append(el('div', { className:'flex items-start gap-2 rounded-md p-3 text-xs mt-2', style:{background:'rgba(244,63,94,0.1)',color:'#f43f5e'} }, error));
-    }
+  }catch(e){
+    S.set({loading:false,error:e.message});
   }
-
-  async function doUpload(file) {
-    if (!file.name.endsWith('.xlsx')) { setState({error:'Only .xlsx files are supported'}); return; }
-    setState({loading:true, error:null});
-    try {
-      const session = await uploadExcel(file);
-      setState({session, resolvedValues: session.resolved_values, overrides:{}, loading:false});
-    } catch(e) {
-      setState({loading:false, error: e.message});
-    }
-  }
-
-  subscribe(render);
-  render();
 }
 
-function SidebarAI(container) {
-  function render() {
-    container.innerHTML = '';
-    const { selectedCell, explanation, explaining } = state;
-
-    if (!selectedCell && !explaining) {
-      container.append(el('div', { className:'flex flex-col items-center gap-3 rounded-lg p-5 text-center', style:{background:'#1e293b'} },
-        el('div', { className:'flex h-10 w-10 items-center justify-center rounded-full mx-auto', style:{background:'rgba(99,102,241,0.2)'} },
-          el('svg', { xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#6366f1', 'stroke-width':'1.5', class:'h-5 w-5', html:'<path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.8 1.8M5 14.5l-1.8 1.8M5 14.5h14.8M5 14.5v4.5a1.5 1.5 0 001.5 1.5h11a1.5 1.5 0 001.5-1.5V14.5"/>'})),
-        el('p', {className:'text-sm font-medium text-surface-200'}, 'Ask the Assistant'),
-        el('p', {className:'text-xs text-surface-600'}, 'Click any KPI card or formula row to get a plain-English explanation.')
-      ));
-      return;
-    }
-
-    const card = el('div', {className:'rounded-lg overflow-hidden', style:{border:'1px solid #334155', background:'#1e293b'}});
-    const header = el('div', {className:'flex items-center justify-between px-4 py-3', style:{borderBottom:'1px solid #334155'}},
-      el('span', {className:'text-sm font-semibold text-surface-200'}, selectedCell?.label ?? '…'),
-      el('button', {className:'text-surface-600 hover:text-surface-400 text-lg leading-none', onClick:()=>setState({selectedCell:null,explanation:null})}, '×')
-    );
-    card.append(header);
-
-    const body = el('div', {className:'p-4 space-y-4'});
-    if (explaining) {
-      [80,60,90].forEach(w => body.append(el('div', {className:'h-3 rounded shimmer', style:{width:`${w}%`}})));
-    } else if (explanation) {
-      [
-        ['What it means', explanation.what_it_means],
-        ['Business impact', explanation.business_impact],
-        ['Sensitivity', explanation.sensitivity],
-      ].forEach(([title, text]) => {
-        if (!text) return;
-        body.append(
-          el('div', {className:'space-y-1'},
-            el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, title),
-            el('p', {className:'text-xs leading-relaxed', style:{color:'#94a3b8'}}, text)
-          )
-        );
-      });
-    }
-    card.append(body);
-    container.append(card);
-  }
-
-  subscribe(render); render();
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenario override
+// ─────────────────────────────────────────────────────────────────────────────
+async function doOverride(cellId,val){
+  const n=parseFloat(val); if(isNaN(n)) return;
+  const overrides={...S.overrides,[cellId]:n};
+  S.set({overrides});
+  if(!S.session) return;
+  try{
+    const r=await apiSimulate(S.session.session_id,overrides);
+    S.set({values:r.values});
+    // Recompute smart KPIs client-side after sim
+    updateKpisAfterSim(r.values);
+  }catch{}
 }
 
-function buildSidebar() {
-  const sidebar = el('aside', {
-    className:'flex h-full shrink-0 flex-col gap-5 p-4',
-    style:{width:'260px', borderRight:'1px solid #334155', background:'#0f172a', overflowY:'auto'}
+function updateKpisAfterSim(newValues){
+  // Re-extract business_kpis from updated resolved values
+  // For now, just update the values in the existing KPIs
+  if(!S.session) return;
+  const updatedKpis=(S.session.business_kpis||[]).map(k=>{
+    if(k.cell_id&&newValues[k.cell_id]!=null){
+      return {...k, value:Number(newValues[k.cell_id])};
+    }
+    return k;
+  });
+  S.session.business_kpis_live=updatedKpis;
+  S.set({}); // trigger re-render
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Charts
+// ─────────────────────────────────────────────────────────────────────────────
+const _charts={};
+function destroyChart(id){if(_charts[id]){_charts[id].destroy();delete _charts[id];}}
+
+const chartDefaults={
+  color:'#94a3b8',
+  borderColor:'#1e293b',
+  animation:{duration:400},
+  plugins:{
+    legend:{labels:{color:'#94a3b8',font:{family:'Inter',size:10},boxWidth:8,padding:12}},
+    tooltip:{bodyFont:{size:11},titleFont:{size:11}}
+  },
+  scales:{
+    x:{grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'#475569',font:{size:9},maxRotation:0,maxTicksLimit:8}},
+    y:{grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'#475569',font:{size:9},maxTicksLimit:5,callback:v=>fmtNum(v,'')}}
+  }
+};
+
+// Chart card with FIXED height wrapper so canvas never overflows
+function makeChartCard(title,chartId){
+  const card=h('div',{class:'card',style:{
+    padding:'14px',display:'flex',flexDirection:'column',gap:'8px',
+    minWidth:0,  /* prevent grid blowout */
+  }});
+  card.append(h('p',{style:{
+    fontSize:'11px',fontWeight:600,color:'#475569',
+    textTransform:'uppercase',letterSpacing:'.05em',flexShrink:0
+  }},title));
+  // Fixed-height wrapper: Chart.js reads this for sizing
+  const wrap=h('div',{style:{position:'relative',height:'180px',width:'100%'}});
+  const canvas=h('canvas',{id:chartId});
+  wrap.append(canvas);
+  card.append(wrap);
+  return {card,canvas};
+}
+
+function buildAllCharts(container){
+  container.innerHTML='';
+  // Destroy all existing charts
+  Object.keys(_charts).forEach(id=>{_charts[id].destroy();delete _charts[id];});
+
+  const {session,values}=S; if(!session) return;
+  const ts=session.time_series||[];
+
+  const revSeries  =ts.filter(s=>s.category==='revenue').slice(0,2);
+  const costSeries =ts.filter(s=>s.category==='costs').slice(0,2);
+  const profitSeries=ts.filter(s=>s.category==='profit').slice(0,1);
+  const userSeries =ts.filter(s=>s.category==='users'||s.category==='subscribers'||s.category==='cashflow').slice(0,2);
+
+  const hasRevenue =revSeries.length>0||profitSeries.length>0;
+  const hasCosts   =costSeries.length>0;
+  const hasUsers   =userSeries.length>0;
+
+  // Fallback: sum all numeric cells by column
+  if(!hasRevenue&&!hasCosts&&!hasUsers){
+    const byCols={};
+    (session.cells||[]).forEach(c=>{
+      if(c.type==='label') return;
+      const v=Number(values[c.id]??c.value??0);
+      if(!isNaN(v)&&v!==0) byCols[c.col]=(byCols[c.col]||0)+v;
+    });
+    const cols=Object.entries(byCols).sort(([a],[b])=>+a-+b).slice(0,16);
+    if(cols.length>0) revSeries.push({label:'Totale per periodo',series:cols.map(([,v])=>v),n_periods:cols.length});
+  }
+
+  // Always 3-column grid, each chart takes 1 col
+  const nCharts=[hasRevenue||revSeries.length>0,hasCosts,hasUsers].filter(Boolean).length||1;
+  const grid=h('div',{style:{
+    display:'grid',gap:'12px',
+    gridTemplateColumns:`repeat(${Math.min(nCharts,3)},1fr)`,
+    alignItems:'start'    /* prevent stretching */
+  }});
+  container.append(grid);
+
+  function shorten(s){return s.length>28?s.slice(0,28)+'…':s;}
+  const opts=(extra={})=>({
+    ...chartDefaults,responsive:true,maintainAspectRatio:false,
+    plugins:{
+      ...chartDefaults.plugins,
+      legend:{...chartDefaults.plugins.legend,
+        display:true,position:'bottom',
+        labels:{...chartDefaults.plugins.legend.labels,boxWidth:8,padding:10}},
+    },
+    ...extra
   });
 
-  // Logo
-  sidebar.append(el('div', {className:'flex items-center gap-2.5 px-1 py-2'},
-    el('div', {className:'flex h-7 w-7 items-center justify-center rounded-lg', style:{background:'#6366f1'}},
-      el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'white', 'stroke-width':'2', style:{width:'16px',height:'16px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>'})),
-    el('span', {className:'text-sm font-bold tracking-tight', style:{color:'#e2e8f0'}}, 'FinSim')
-  ));
-
-  sidebar.append(el('div', {style:{height:'1px', background:'#334155'}}));
-
-  // File section
-  const fileSection = el('div', {className:'space-y-2'});
-  fileSection.append(el('p', {className:'px-1 text-xs font-semibold uppercase tracking-widest', style:{color:'#475569'}}, 'Data Source'));
-  const fileContainer = el('div');
-  fileSection.append(fileContainer);
-  sidebar.append(fileSection);
-
-  // Render file state reactively
-  function renderFileState() {
-    fileContainer.innerHTML = '';
-    const { session } = state;
-    if (session) {
-      fileContainer.append(
-        el('div', {className:'flex items-center gap-2 rounded-lg px-3 py-2.5', style:{background:'#1e293b'}},
-          el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#10b981', 'stroke-width':'1.5', style:{width:'16px',height:'16px',flexShrink:'0'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/>'}),
-          el('span', {className:'text-xs truncate', style:{color:'#94a3b8'}}, session.filename)
-        ),
-        el('button', {
-          className:'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:opacity-80',
-          style:{color:'#475569'},
-          onClick:() => setState({session:null, resolvedValues:{}, overrides:{}, error:null, selectedCell:null, explanation:null})
-        }, '↺  Load new file')
-      );
-    } else {
-      FileUploadSection(fileContainer);
-    }
+  // ── Chart 1: Ricavi & Profitto ───────────────────────────────────────────
+  if(revSeries.length>0||profitSeries.length>0){
+    const all=[...revSeries,...profitSeries];
+    const nP=Math.max(...all.map(s=>s.n_periods||0));
+    const labels=[...Array(nP)].map((_,i)=>`M${i+1}`);
+    const datasets=[
+      ...revSeries.map((s,i)=>({
+        label:shorten(s.label),data:s.series,
+        borderColor:['#6366f1','#06b6d4'][i%2],
+        backgroundColor:['rgba(99,102,241,.08)','rgba(6,182,212,.08)'][i%2],
+        fill:true,tension:.35,borderWidth:2,pointRadius:2,pointHoverRadius:4,
+      })),
+      ...profitSeries.map(s=>({
+        label:shorten(s.label),data:s.series,
+        borderColor:'#10b981',backgroundColor:'rgba(16,185,129,.06)',
+        fill:true,tension:.35,borderWidth:2,borderDash:[5,3],pointRadius:0,
+      }))
+    ];
+    const {card,canvas}=makeChartCard('Ricavi & Profitto','c-rev');
+    grid.append(card);
+    _charts['rev']=new Chart(canvas.getContext('2d'),{
+      type:'line',data:{labels,datasets},
+      options:opts({plugins:{...opts().plugins,tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmtEur(c.parsed.y)}`}}}})
+    });
   }
-  subscribe(renderFileState); renderFileState();
 
-  sidebar.append(el('div', {style:{height:'1px', background:'#334155'}}));
+  // ── Chart 2: Struttura costi ─────────────────────────────────────────────
+  if(costSeries.length>0){
+    const nP=Math.max(...costSeries.map(s=>s.n_periods));
+    const labels=[...Array(nP)].map((_,i)=>`M${i+1}`);
+    const datasets=costSeries.map((s,i)=>({
+      label:shorten(s.label),data:s.series,
+      backgroundColor:['rgba(244,63,94,.75)','rgba(245,158,11,.75)'][i%2],
+      borderRadius:2,borderSkipped:false,
+    }));
+    const {card,canvas}=makeChartCard('Struttura dei Costi','c-costs');
+    grid.append(card);
+    _charts['costs']=new Chart(canvas.getContext('2d'),{
+      type:'bar',data:{labels,datasets},
+      options:opts({
+        scales:{
+          x:{...chartDefaults.scales.x,stacked:true},
+          y:{...chartDefaults.scales.y,stacked:true}
+        },
+        plugins:{...opts().plugins,tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmtEur(c.parsed.y)}`}}}
+      })
+    });
+  }
 
-  // AI Assistant
-  const aiSection = el('div', {className:'space-y-2', style:{flex:'1'}});
-  aiSection.append(el('p', {className:'px-1 text-xs font-semibold uppercase tracking-widest', style:{color:'#475569'}}, 'AI Assistant'));
-  const aiContainer = el('div');
-  aiSection.append(aiContainer);
-  SidebarAI(aiContainer);
-  sidebar.append(aiSection);
-
-  sidebar.append(el('p', {className:'text-xs px-1', style:{color:'#334155'}}, 'Powered by Claude · FinSim v1.0'));
-
-  return sidebar;
+  // ── Chart 3: Clienti / Abbonamenti ───────────────────────────────────────
+  if(userSeries.length>0){
+    const nP=Math.max(...userSeries.map(s=>s.n_periods));
+    const labels=[...Array(nP)].map((_,i)=>`M${i+1}`);
+    const datasets=userSeries.map((s,i)=>({
+      label:shorten(s.label),data:s.series,
+      borderColor:['#8b5cf6','#f59e0b'][i%2],
+      backgroundColor:['rgba(139,92,246,.08)','rgba(245,158,11,.08)'][i%2],
+      fill:true,tension:.35,borderWidth:2,pointRadius:2,pointHoverRadius:4,
+    }));
+    const {card,canvas}=makeChartCard('Clienti & Abbonamenti','c-users');
+    grid.append(card);
+    _charts['users']=new Chart(canvas.getContext('2d'),{
+      type:'line',data:{labels,datasets},
+      options:opts({
+        scales:{...chartDefaults.scales,y:{...chartDefaults.scales.y,ticks:{...chartDefaults.scales.y.ticks,callback:v=>fmtNum(v,'')}}},
+        plugins:{...opts().plugins,tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmtNum(c.parsed.y,'')}`}}}
+      })
+    });
+  }
 }
 
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KPICard(cell, synthetic) {
-  const label  = cell?.label ?? synthetic?.label ?? '';
-  const rawVal = cell ? (state.resolvedValues[cell.id] ?? cell.value) : synthetic?.value;
-  const display = fmtVal(rawVal, cell?.data_type, cell?.format_string);
-  const color  = valColor(rawVal);
-  const isAI   = synthetic?.is_ai_generated;
+// ─────────────────────────────────────────────────────────────────────────────
+// KPI card
+// ─────────────────────────────────────────────────────────────────────────────
+function kpiCard(kpi){
+  const val=kpi.value;
+  const baseKpi=(S.baselineKpis||[]).find(b=>b.id===kpi.id);
+  const baseVal=baseKpi?.value;
+  const delta=baseVal!=null&&baseVal!==0?(val-baseVal)/Math.abs(baseVal)*100:null;
 
-  const card = el('button', {
-    className:'group relative rounded-xl border text-left transition-all p-4 w-full fade-in',
-    style:{background:'#1e293b', border:'1px solid #334155', cursor: cell ? 'pointer' : 'default'}
-  });
+  const accent=(CAT_META[kpi.category]||{color:'#6366f1'}).color;
 
-  if (isAI) {
-    card.append(el('span', {
-      className:'absolute right-3 top-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
-      style:{background:'rgba(99,102,241,0.2)', color:'#6366f1', fontSize:'10px'}
-    }, '✦ AI'));
+  const card=h('div',{class:'card card-hover fade-in',style:{
+    padding:'20px',position:'relative',overflow:'hidden',
+  }});
+
+  // Accent line top
+  const accentBar=h('div',{style:{
+    position:'absolute',top:0,left:0,right:0,height:'3px',
+    background:accent,borderRadius:'14px 14px 0 0'
+  }});
+  card.append(accentBar);
+
+  // Label
+  card.append(h('p',{style:{
+    fontSize:'11px',color:'#475569',fontWeight:600,
+    textTransform:'uppercase',letterSpacing:'.05em',marginTop:'4px',lineHeight:'1.4'
+  }},kpi.label));
+
+  // Value
+  const displayVal=fmtNum(val,kpi.unit);
+  card.append(h('p',{style:{
+    fontFamily:'JetBrains Mono,monospace',fontSize:'26px',fontWeight:700,
+    marginTop:'8px',color:'#e2e8f0',letterSpacing:'-.02em'
+  }},displayVal));
+
+  // Delta badge
+  if(delta!=null&&Math.abs(delta)>0.01){
+    const sign=delta>0?'+':'';
+    card.append(h('div',{style:{
+      display:'flex',alignItems:'center',gap:'4px',marginTop:'8px'
+    }},
+      h('span',{style:{
+        fontSize:'11px',fontWeight:700,
+        color:deltaColor(delta),
+        background:`${deltaColor(delta)}18`,
+        borderRadius:'6px',padding:'2px 8px'
+      }},`${deltaArrow(delta)} ${sign}${delta.toFixed(1)}% vs baseline`)
+    ));
   }
 
-  card.append(el('p', {className:'text-xs truncate pr-8', style:{color:'#475569'}}, label));
-  card.append(el('p', {className:'mt-1.5 font-mono text-xl font-bold tracking-tight', style:{color, fontFamily:'JetBrains Mono, monospace'}}, display));
-
-  if (synthetic) {
-    card.append(el('p', {className:'mt-2 text-xs leading-relaxed', style:{color:'#475569', fontSize:'10px', overflow:'hidden', display:'-webkit-box', WebkitLineClamp:'2', WebkitBoxOrient:'vertical'}}, synthetic.formula_used));
-  }
-
-  if (cell) {
-    card.onmouseenter = () => { card.style.borderColor = 'rgba(99,102,241,0.5)'; card.style.background = 'rgba(51,65,85,0.5)'; };
-    card.onmouseleave = () => { card.style.borderColor = '#334155'; card.style.background = '#1e293b'; };
-    card.onclick = async () => {
-      setState({ selectedCell: cell, explanation: null, explaining: true });
-      try {
-        const exp = await explainCell(state.session.session_id, cell.id);
-        setState({ explanation: exp, explaining: false });
-      } catch {
-        setState({ explanation: { cell_id: cell.id, what_it_means: 'Could not fetch explanation — is the backend running?', business_impact:'', sensitivity:'' }, explaining: false });
-      }
-    };
+  // Description
+  if(kpi.description){
+    card.append(h('p',{style:{
+      fontSize:'11px',color:'#334155',marginTop:'10px',lineHeight:'1.5'
+    }},kpi.description));
   }
 
   return card;
 }
 
-// ─── Input Slider ─────────────────────────────────────────────────────────────
-function InputSliderCard(cell) {
-  const base = Number(cell.value) || 1;
-  const min  = base < 0 ? base * 4 : 0;
-  const max  = base < 0 ? 0 : base * 4 || 1000;
-  const step = Math.max(1, Math.abs(base) / 1000);
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenario parameter slider
+// ─────────────────────────────────────────────────────────────────────────────
+function scenarioSlider(param){
+  const wrap=h('div',{style:{display:'flex',flexDirection:'column',gap:'8px'}});
 
-  function currentVal() { return Number(state.overrides[cell.id] ?? state.resolvedValues[cell.id] ?? cell.value ?? 0); }
+  const topRow=h('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'8px'}});
+  const labelEl=h('p',{style:{fontSize:'12px',fontWeight:500,color:'#94a3b8',lineHeight:'1.4',flex:'1'}},param.label);
+  const valEl=h('span',{style:{
+    fontFamily:'JetBrains Mono,monospace',fontSize:'13px',fontWeight:700,
+    color:'#e2e8f0',flexShrink:0,whiteSpace:'nowrap'
+  }});
 
-  const wrapper = el('div', {className:'rounded-lg border p-3.5 space-y-2.5 transition-colors', style:{background:'#1e293b', border:'1px solid #334155'}});
+  const getCurrent=()=>Number(S.overrides[param.cell_id]??param.value??0);
 
-  const topRow = el('div', {className:'flex items-center justify-between'});
-  const lbl = el('button', {className:'text-xs font-medium text-left transition-colors', style:{color:'#94a3b8'}}, cell.label);
-  lbl.onmouseenter = () => lbl.style.color = '#e2e8f0';
-  lbl.onmouseleave = () => lbl.style.color = '#94a3b8';
-  const valSpan = el('span', {className:'font-mono text-sm font-semibold', style:{color: valColor(currentVal()), fontFamily:'JetBrains Mono, monospace'}}, fmtVal(currentVal(), cell.data_type, cell.format_string));
-  topRow.append(lbl, valSpan);
-
-  const numInput = el('input', {type:'number', value: currentVal(), className:'w-full rounded px-2.5 py-1.5 font-mono text-xs', style:{background:'#0f172a', border:'1px solid #334155', color:'#e2e8f0', fontFamily:'JetBrains Mono, monospace', outline:'none'}});
-  numInput.onfocus = () => numInput.style.borderColor = '#6366f1';
-  numInput.onblur = () => { numInput.style.borderColor = '#334155'; commit(numInput.value); };
-  numInput.onkeydown = e => { if (e.key === 'Enter') commit(numInput.value); };
-
-  const slider = el('input', {type:'range', min, max, step, value: currentVal()});
-
-  async function commit(raw) {
-    const n = parseFloat(raw); if (isNaN(n)) return;
-    setState(s => ({overrides: {...s.overrides, [cell.id]: n}}));
-    valSpan.textContent = fmtVal(n, cell.data_type, cell.format_string);
-    valSpan.style.color = valColor(n);
-    if (!state.session) return;
-    try {
-      const result = await runSimulation(state.session.session_id, {...state.overrides, [cell.id]: n});
-      setState({resolvedValues: result.values});
-    } catch { /* silent */ }
+  function refresh(){
+    const v=getCurrent();
+    valEl.textContent=fmtNum(v,param.unit);
   }
+  refresh();
+  topRow.append(labelEl,valEl);
 
-  slider.oninput = e => { numInput.value = e.target.value; commit(e.target.value); };
+  const slider=h('input',{type:'range',
+    min:param.min,max:param.max,step:param.step,value:getCurrent()});
+  slider.style.accentColor='#6366f1';
 
-  wrapper.append(topRow, numInput, slider);
-  return wrapper;
-}
-
-// ─── Charts via Recharts ──────────────────────────────────────────────────────
-function renderCharts(container) {
-  container.innerHTML = '';
-  const { session, resolvedValues } = state;
-  if (!session) return;
-
-  // Build cashflow data from column sums
-  const byCol = {};
-  session.cells.forEach(c => {
-    if (c.type === 'label') return;
-    const v = Number(resolvedValues[c.id] ?? c.value ?? 0);
-    if (!isNaN(v)) byCol[c.col] = (byCol[c.col]||0) + v;
+  // Number input
+  const numEl=h('input',{type:'number',
+    value:getCurrent(),step:param.step,min:param.min,max:param.max,
+    style:{
+      background:'#0a0f1e',border:'1px solid #1e293b',borderRadius:'6px',
+      padding:'4px 8px',fontFamily:'JetBrains Mono,monospace',
+      fontSize:'12px',color:'#e2e8f0',outline:'none',width:'100px',
+      textAlign:'right'
+    }
   });
-  const cashData = Object.entries(byCol).sort(([a],[b])=>+a - +b).slice(0,16).map(([,v],i)=>({period:`P${i+1}`,value:v}));
+  numEl.onfocus=()=>numEl.style.borderColor='#6366f1';
+  numEl.onblur=()=>{numEl.style.borderColor='#1e293b';commit(numEl.value);};
+  numEl.onkeydown=e=>{if(e.key==='Enter')commit(numEl.value);};
 
-  // Revenue/cost cells
-  const revKw = ['revenue','sales','income','ricavi'];
-  const costKw = ['cost','expense','spesa','costo','burn'];
-  const revCells = session.cells.filter(c => c.type!=='label' && revKw.some(k=>c.label.toLowerCase().includes(k)) && !isNaN(Number(resolvedValues[c.id]??c.value)));
-  const costCells = session.cells.filter(c => c.type!=='label' && costKw.some(k=>c.label.toLowerCase().includes(k)) && !isNaN(Number(resolvedValues[c.id]??c.value)));
-
-  const allLbls = [...new Set([...revCells.map(c=>c.label),...costCells.map(c=>c.label)])].slice(0,8);
-  const rvData = allLbls.length ? allLbls.map(lbl=>{
-    const rc = revCells.find(c=>c.label===lbl);
-    const cc = costCells.find(c=>c.label===lbl);
-    return { name: lbl.length>12?lbl.slice(0,12)+'…':lbl, Revenue: rc?Math.abs(Number(resolvedValues[rc.id]??rc.value??0)):0, Costs: cc?Math.abs(Number(resolvedValues[cc.id]??cc.value??0)):0 };
-  }) : null;
-
-  // Pie data
-  const pieData = session.cells.filter(c=>c.type==='static'&&Number(resolvedValues[c.id]??c.value)>0).map(c=>({name:c.label.slice(0,16),value:Number(resolvedValues[c.id]??c.value??0)})).sort((a,b)=>b.value-a.value).slice(0,6);
-  const PIE_COLORS = ['#6366f1','#10b981','#f59e0b','#f43f5e','#06b6d4','#8b5cf6'];
-
-  const grid = el('div', {className:'grid gap-4', style:{gridTemplateColumns:'repeat(auto-fit, minmax(340px,1fr))'}});
-
-  // Cashflow area chart
-  if (cashData.length > 1) {
-    const div = el('div', {className:'rounded-xl border p-4 space-y-3', style:{background:'#1e293b', border:'1px solid #334155'}});
-    div.append(el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Cumulative Value by Period'));
-    const chartDiv = el('div', {style:{height:'180px'}});
-    div.append(chartDiv); grid.append(div);
-
-    // React-free Recharts rendering
-    import('https://esm.sh/react@18?bundle').then(React => {
-      import('https://esm.sh/react-dom@18/client?bundle').then(RD => {
-        const root = RD.createRoot(chartDiv);
-        root.render(React.createElement(ResponsiveContainer, {width:'100%',height:180},
-          React.createElement(AreaChart, {data:cashData, margin:{top:4,right:8,left:0,bottom:0}},
-            React.createElement('defs', null,
-              React.createElement('linearGradient', {id:'grad',x1:'0',y1:'0',x2:'0',y2:'1'},
-                React.createElement('stop', {offset:'5%',stopColor:'#6366f1',stopOpacity:0.3}),
-                React.createElement('stop', {offset:'95%',stopColor:'#6366f1',stopOpacity:0})
-              )
-            ),
-            React.createElement(CartesianGrid, {strokeDasharray:'3 3',stroke:'#334155'}),
-            React.createElement(XAxis, {dataKey:'period',tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false}),
-            React.createElement(YAxis, {tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false,tickFormatter:v=>fmtVal(v,'number')}),
-            React.createElement(Tooltip, {contentStyle:{background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:12},labelStyle:{color:'#94a3b8'}}),
-            React.createElement(Area, {type:'monotone',dataKey:'value',stroke:'#6366f1',strokeWidth:2,fill:'url(#grad)'})
-          )
-        ));
-      });
-    });
+  async function commit(raw){
+    const n=parseFloat(raw); if(isNaN(n)) return;
+    await doOverride(param.cell_id,n);
+    slider.value=getCurrent();
+    numEl.value=getCurrent();
+    refresh();
   }
+  slider.oninput=e=>{numEl.value=e.target.value;commit(e.target.value);};
 
-  // Revenue bar chart
-  if (rvData && rvData.length > 0) {
-    const div = el('div', {className:'rounded-xl border p-4 space-y-3', style:{background:'#1e293b', border:'1px solid #334155'}});
-    div.append(el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Revenue vs Costs'));
-    const chartDiv = el('div', {style:{height:'180px'}});
-    div.append(chartDiv); grid.append(div);
+  // Hint text
+  const hint=h('p',{style:{fontSize:'10px',color:'#334155',lineHeight:'1.4'}},param.description);
 
-    import('https://esm.sh/react@18?bundle').then(React => {
-      import('https://esm.sh/react-dom@18/client?bundle').then(RD => {
-        RD.createRoot(chartDiv).render(React.createElement(ResponsiveContainer,{width:'100%',height:180},
-          React.createElement(BarChart,{data:rvData,margin:{top:4,right:8,left:0,bottom:0}},
-            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#334155'}),
-            React.createElement(XAxis,{dataKey:'name',tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false}),
-            React.createElement(YAxis,{tick:{fill:'#475569',fontSize:10},tickLine:false,axisLine:false,tickFormatter:v=>fmtVal(v,'number')}),
-            React.createElement(Tooltip,{contentStyle:{background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:12}}),
-            React.createElement(Legend,{wrapperStyle:{fontSize:11,color:'#94a3b8'}}),
-            React.createElement(Bar,{dataKey:'Revenue',fill:'#10b981',radius:[4,4,0,0]}),
-            React.createElement(Bar,{dataKey:'Costs',fill:'#f43f5e',radius:[4,4,0,0]})
-          )
-        ));
-      });
-    });
-  }
-
-  // Pie chart
-  if (pieData.length >= 2) {
-    const div = el('div', {className:'rounded-xl border p-4 space-y-3', style:{background:'#1e293b', border:'1px solid #334155'}});
-    div.append(el('p', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Budget Allocation'));
-    const inner = el('div', {className:'flex items-center gap-4'});
-    const chartDiv = el('div', {style:{height:'140px', width:'50%', flexShrink:'0'}});
-    const legend = el('ul', {className:'space-y-1.5 flex-1'});
-    pieData.forEach((s,i) => legend.append(
-      el('li', {className:'flex items-center gap-2 text-xs', style:{color:'#94a3b8'}},
-        el('span', {className:'inline-block h-2 w-2 rounded-full shrink-0', style:{background:PIE_COLORS[i%PIE_COLORS.length]}}),
-        el('span', {style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, s.name)
-      )
-    ));
-    inner.append(chartDiv, legend);
-    div.append(inner); grid.append(div);
-
-    import('https://esm.sh/react@18?bundle').then(React => {
-      import('https://esm.sh/react-dom@18/client?bundle').then(RD => {
-        RD.createRoot(chartDiv).render(React.createElement(ResponsiveContainer,{width:'100%',height:140},
-          React.createElement(PieChart,null,
-            React.createElement(Pie,{data:pieData,cx:'50%',cy:'50%',innerRadius:36,outerRadius:58,dataKey:'value',strokeWidth:0},
-              ...pieData.map((_,i)=>React.createElement(Cell,{key:i,fill:PIE_COLORS[i%PIE_COLORS.length]}))
-            ),
-            React.createElement(Tooltip,{contentStyle:{background:'#1e293b',border:'1px solid #334155',borderRadius:8,fontSize:12},formatter:v=>[fmtVal(v,'number'),'']})
-          )
-        ));
-      });
-    });
-  }
-
-  container.append(grid);
+  wrap.append(topRow,
+    h('div',{style:{display:'flex',alignItems:'center',gap:'8px'}},slider,numEl),
+    hint);
+  return wrap;
 }
 
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
-function buildDashboard(container) {
-  function render() {
-    container.innerHTML = '';
-    const { session, resolvedValues } = state;
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty state
+// ─────────────────────────────────────────────────────────────────────────────
+function emptyState(){
+  const w=h('div',{style:{
+    display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+    height:'100vh',gap:'28px',padding:'32px',textAlign:'center'
+  }});
+  // Logo area
+  w.append(h('div',{style:{
+    width:'80px',height:'80px',borderRadius:'20px',
+    background:'linear-gradient(135deg,rgba(99,102,241,.2),rgba(139,92,246,.2))',
+    border:'1px solid rgba(99,102,241,.3)',
+    display:'flex',alignItems:'center',justifyContent:'center',fontSize:'32px'
+  }},'📊'));
 
-    if (!session) {
-      container.append(el('div', {className:'flex h-full flex-col items-center justify-center gap-5 p-8 text-center', style:{minHeight:'100vh'}},
-        el('div', {className:'flex h-16 w-16 items-center justify-center rounded-2xl mx-auto', style:{background:'#1e293b', border:'1px solid #334155'}},
-          el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#475569', 'stroke-width':'1.5', style:{width:'32px',height:'32px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z">'})
-        ),
-        el('div', {className:'space-y-2 max-w-sm'},
-          el('h1', {className:'text-xl font-bold', style:{color:'#e2e8f0'}}, 'Financial Simulation Dashboard'),
-          el('p', {className:'text-sm leading-relaxed', style:{color:'#475569'}}, 'Upload an Excel financial model to get interactive sliders, real-time KPI recalculation, AI-generated metrics, and plain-English explanations.')
-        ),
-        el('div', {className:'flex gap-4 text-xs', style:{color:'#334155'}},
-          el('span', {}, 'What-If Analysis'), el('span',{},'·'), el('span',{},'Formula Breakdown'), el('span',{},'·'), el('span',{},'AI Glossary')
-        )
-      ));
-      return;
-    }
+  w.append(h('div',{style:{maxWidth:'420px',display:'flex',flexDirection:'column',gap:'12px'}},
+    h('h1',{style:{fontSize:'24px',fontWeight:700,letterSpacing:'-.03em'}},
+      h('span',{class:'gradient-text'},'Architetto Gestionale')),
+    h('p',{style:{fontSize:'14px',color:'#475569',lineHeight:'1.8'}},
+      'Carica il tuo piano economico-finanziario in Excel. '+
+      'Il sistema estrae automaticamente le metriche chiave che un investitore vuole vedere: '+
+      'MRR, ARR, CAC, LTV, Churn, Margini e Runway.')
+  ));
 
-    const wrap = el('div', {className:'p-6 space-y-8'});
+  // Feature chips
+  const chips=h('div',{style:{display:'flex',flexWrap:'wrap',gap:'8px',justifyContent:'center',maxWidth:'400px'}});
+  ['📈 Analisi ricavi','💸 Struttura costi','🎯 Unit economics',
+   '🔄 Churn & Retention','🚀 Scenario what-if','📉 Break-even'].forEach(t=>{
+    chips.append(h('span',{class:'chip'},t));
+  });
+  w.append(chips);
+  return w;
+}
 
-    // Header
-    const header = el('div', {className:'flex items-center justify-between'});
-    header.append(
-      el('div', {},
-        el('h1', {className:'text-lg font-bold', style:{color:'#e2e8f0'}}, session.filename),
-        el('p', {className:'text-xs mt-0.5', style:{color:'#475569'}}, `${session.static_cells.length} inputs · ${session.calculated_cells.length} formulas · ${session.sheets.join(', ')}`)
+// ─────────────────────────────────────────────────────────────────────────────
+// Upload drop zone
+// ─────────────────────────────────────────────────────────────────────────────
+function uploadZone(){
+  const inp=h('input',{type:'file',accept:'.xlsx,.xls',style:{display:'none'}});
+  inp.onchange=e=>{const f=e.target.files?.[0];if(f)doUpload(f);inp.value='';};
+  let drag=false;
+  const drop=h('button',{class:'btn',style:{
+    width:'100%',borderRadius:'12px',
+    border:`2px dashed ${drag?'#6366f1':'#1e293b'}`,
+    padding:'20px 16px',textAlign:'center',transition:'all .2s',
+    background:'transparent'
+  },onClick:()=>inp.click()});
+  drop.ondragover=e=>{e.preventDefault();drag=true;drop.style.borderColor='#6366f1';drop.style.background='rgba(99,102,241,.06)';};
+  drop.ondragleave=()=>{drag=false;drop.style.borderColor='#1e293b';drop.style.background='';};
+  drop.ondrop=e=>{e.preventDefault();drag=false;drop.style.borderColor='#1e293b';drop.style.background='';
+    const f=e.dataTransfer.files[0];if(f)doUpload(f);};
+
+  if(S.loading){
+    drop.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+      <div class="spin" style="width:22px;height:22px;border-radius:50%;border:2px solid #6366f1;border-top-color:transparent"></div>
+      <p style="font-size:12px;color:#94a3b8">Analisi in corso…</p></div>`;
+  } else {
+    drop.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <span style="font-size:24px">📂</span>
+      <p style="font-size:13px;font-weight:600;color:#e2e8f0">Carica Excel</p>
+      <p style="font-size:11px;color:#475569">.xlsx · .xls · max 10 MB</p></div>`;
+  }
+  return h('div',{},drop,inp);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Category definitions (must match backend CATEGORY_META)
+// ─────────────────────────────────────────────────────────────────────────────
+const CAT_META={
+  growth:        {label:'Ricavi & Crescita',    icon:'📈', color:'#6366f1'},
+  unit_economics:{label:'Unit Economics',        icon:'🎯', color:'#8b5cf6'},
+  profitability: {label:'Redditività & Margini', icon:'💰', color:'#10b981'},
+  cash:          {label:'Cassa & Sostenibilità', icon:'🏦', color:'#06b6d4'},
+  fundraising:   {label:'Funding & Valuation',   icon:'🚀', color:'#f59e0b'},
+};
+const CAT_ORDER=['growth','unit_economics','profitability','cash','fundraising'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main dashboard (investor view)
+// ─────────────────────────────────────────────────────────────────────────────
+function buildDashboard(session){
+  const kpis=session.business_kpis_live||session.business_kpis||[];
+  const params=session.scenario_params||[];
+
+  const wrap=h('div',{style:{
+    flex:'1',display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden'
+  }});
+
+  // ── Top bar ───────────────────────────────────────────────────────────────
+  const topbar=h('div',{style:{
+    display:'flex',alignItems:'center',justifyContent:'space-between',
+    padding:'12px 24px',borderBottom:'1px solid #1e293b',flexShrink:0,
+    background:'rgba(10,15,30,.95)',backdropFilter:'blur(8px)'
+  }});
+  topbar.append(
+    h('div',{style:{display:'flex',alignItems:'center',gap:'12px'}},
+      h('span',{style:{fontSize:'18px'}},'📊'),
+      h('div',{},
+        h('p',{style:{fontSize:'13px',fontWeight:700,color:'#e2e8f0'}},
+          session.filename?.replace(/\.xlsx?$/i,'')||'Piano Finanziario'),
+        h('p',{style:{fontSize:'10px',color:'#334155',marginTop:'1px'}},
+          `${session.sheets?.join(' · ')||''}  ·  ${session.cells?.length||0} celle  ·  ${kpis.length} metriche`)
       )
-    );
-    if (session.synthetic_metrics.length > 0) {
-      header.append(el('span', {className:'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium', style:{background:'rgba(99,102,241,0.2)',color:'#6366f1'}}, `✦ ${session.synthetic_metrics.length} AI metrics generated`));
-    }
-    wrap.append(header);
+    ),
+    h('div',{style:{display:'flex',alignItems:'center',gap:'8px'}},
+      h('button',{class:'btn',
+        style:{fontSize:'11px',color:'#475569',padding:'6px 12px',
+          border:'1px solid #1e293b',borderRadius:'8px'},
+        onClick:()=>S.set({session:null,values:{},overrides:{},baselineKpis:null,error:null})
+      },'← Nuovo file')
+    )
+  );
+  wrap.append(topbar);
 
-    // KPI grid
-    const kpiCells = session.cells.filter(c => (c.type==='calculated'||c.type==='static') && c.data_type!=='text').slice(0,8);
-    if (kpiCells.length || session.synthetic_metrics.length) {
-      const sec = el('div', {className:'space-y-3'});
-      sec.append(el('h2', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Financial Performance'));
-      const grid = el('div', {className:'grid gap-3', style:{gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))'}});
-      kpiCells.forEach(c => grid.append(KPICard(c, null)));
-      session.synthetic_metrics.forEach(m => grid.append(KPICard(null, m)));
-      sec.append(grid); wrap.append(sec);
-    }
+  // ── Body: left panel + main ───────────────────────────────────────────────
+  const body=h('div',{style:{flex:'1',display:'flex',overflow:'hidden'}});
+  wrap.append(body);
 
-    // Charts
-    const chartsSection = el('div', {className:'space-y-3'});
-    chartsSection.append(el('h2', {className:'text-xs font-semibold uppercase tracking-wider', style:{color:'#475569'}}, 'Visualizations'));
-    const chartsContainer = el('div');
-    chartsSection.append(chartsContainer);
-    wrap.append(chartsSection);
-    setTimeout(() => renderCharts(chartsContainer), 0);
+  // ── Left: scenario panel ──────────────────────────────────────────────────
+  const sidebar=h('aside',{style:{
+    width:'260px',flexShrink:0,overflowY:'auto',
+    padding:'16px',borderRight:'1px solid #1e293b',
+    display:'flex',flexDirection:'column',gap:'20px'
+  }});
+  sidebar.append(
+    h('p',{class:'section-title'},'🎛  Scenario What-If'),
+    h('p',{style:{fontSize:'11px',color:'#334155',lineHeight:'1.6'}},
+      'Modifica i parametri chiave. Tutte le metriche si aggiornano in tempo reale.')
+  );
+  if(params.length===0){
+    sidebar.append(h('div',{class:'card',style:{padding:'12px'}},
+      h('p',{style:{fontSize:'11px',color:'#475569',lineHeight:'1.6'}},
+        'Nessun parametro modificabile rilevato automaticamente.')));
+  } else {
+    const pw=h('div',{style:{display:'flex',flexDirection:'column',gap:'18px'}});
+    params.slice(0,8).forEach(p=>pw.append(scenarioSlider(p)));
+    sidebar.append(pw);
+  }
 
-    // Control Center
-    const staticCells = session.cells.filter(c => c.type==='static' && session.static_cells.includes(c.id) && !isNaN(Number(resolvedValues[c.id]??c.value)));
-    if (staticCells.length) {
-      const sec = el('div', {className:'space-y-3'});
-      const hdr = el('div', {className:'flex items-center gap-2'},
-        el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#6366f1', 'stroke-width':'1.5', style:{width:'16px',height:'16px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"/>'}),
-        el('h2', {className:'text-sm font-semibold', style:{color:'#e2e8f0'}}, 'Control Center'),
-        el('span', {className:'ml-auto rounded-full px-2 py-0.5 text-xs', style:{background:'#334155',color:'#94a3b8'}}, `${staticCells.length} inputs`)
+  // ── Main content ──────────────────────────────────────────────────────────
+  const main=h('main',{style:{flex:'1',overflowY:'auto',padding:'20px 24px',
+    display:'flex',flexDirection:'column',gap:'24px'}});
+
+  // ── 5-Category tab navigation ─────────────────────────────────────────────
+  // Build per-category KPI maps
+  const byCategory={};
+  CAT_ORDER.forEach(c=>byCategory[c]=[]);
+  kpis.forEach(k=>{
+    if(byCategory[k.category]) byCategory[k.category].push(k);
+  });
+
+  if(kpis.length>0){
+    // Tab state
+    let activeTab='all';
+
+    const tabSection=h('div',{style:{display:'flex',flexDirection:'column',gap:'0'}});
+
+    // ── Summary strip: one hero number per category ───────────────────────
+    const heroRow=h('div',{style:{
+      display:'grid',gap:'10px',
+      gridTemplateColumns:'repeat(5,1fr)',
+      marginBottom:'16px'
+    }});
+    CAT_ORDER.forEach(cat=>{
+      const meta=CAT_META[cat];
+      const items=byCategory[cat];
+      const hero=items[0];
+      const heroVal=hero?fmtNum(hero.value,hero.unit):'—';
+      const card=h('div',{class:'card card-hover',style:{
+        padding:'14px 12px',cursor:'pointer',position:'relative',overflow:'hidden',
+        borderTop:`3px solid ${meta.color}`
+      },onClick:()=>switchTab(cat)});
+      card.append(
+        h('div',{style:{display:'flex',alignItems:'center',gap:'6px',marginBottom:'8px'}},
+          h('span',{style:{fontSize:'14px'}},meta.icon),
+          h('span',{style:{fontSize:'10px',fontWeight:600,color:'#475569',
+            textTransform:'uppercase',letterSpacing:'.06em'}},meta.label)
+        ),
+        h('p',{style:{
+          fontFamily:'JetBrains Mono,monospace',fontSize:'18px',fontWeight:700,
+          color:'#e2e8f0',letterSpacing:'-.02em',marginBottom:'4px'
+        }},heroVal),
+        h('p',{style:{fontSize:'10px',color:'#334155'}},hero?hero.label:'Nessun dato'),
+        h('p',{style:{fontSize:'10px',color:meta.color,marginTop:'4px',fontWeight:600}},
+          `${items.length} metrica${items.length!==1?'e':''}`)
       );
-      sec.append(hdr);
-      const grid = el('div', {className:'grid gap-2.5', style:{gridTemplateColumns:'repeat(auto-fill, minmax(280px,1fr))'}});
-      staticCells.forEach(c => grid.append(InputSliderCard(c)));
-      sec.append(grid); wrap.append(sec);
-    }
+      heroRow.append(card);
+    });
+    tabSection.append(heroRow);
 
-    // Formula Table
-    const formulaCells = session.cells.filter(c => c.type==='calculated' && c.formula);
-    if (formulaCells.length) {
-      const sec = el('div', {className:'space-y-3'});
-      sec.append(el('div', {className:'flex items-center gap-2'},
-        el('svg', {xmlns:'http://www.w3.org/2000/svg', viewBox:'0 0 24 24', fill:'none', stroke:'#f59e0b', 'stroke-width':'1.5', style:{width:'16px',height:'16px'}, html:'<path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/>'}),
-        el('h2', {className:'text-sm font-semibold', style:{color:'#e2e8f0'}}, 'Formula Breakdown'),
-        el('span', {className:'ml-auto rounded-full px-2 py-0.5 text-xs', style:{background:'#334155',color:'#94a3b8'}}, `${formulaCells.length} formulas`)
-      ));
-      const tableWrap = el('div', {className:'rounded-xl overflow-hidden', style:{border:'1px solid #334155', background:'#1e293b'}});
-      const table = el('table', {style:{width:'100%', fontSize:'12px', borderCollapse:'collapse'}});
-      table.append(el('thead', {},
-        el('tr', {style:{borderBottom:'1px solid #334155'}},
-          ...['Cell','Label','Formula','Value'].map((h,i) => el('th', {className:'px-4 py-2.5 font-semibold', style:{textAlign: i===3?'right':'left', color:'#475569'}}, h))
-        )
-      ));
-      const tbody = el('tbody');
-      formulaCells.forEach((cell,i) => {
-        const val = resolvedValues[cell.id] ?? cell.value;
-        const tr = el('tr', {
-          style:{borderBottom:'1px solid rgba(51,65,85,0.5)', background: i%2===0?'transparent':'rgba(30,41,59,0.5)', cursor:'pointer'}
-        },
-          el('td', {className:'px-4 py-2.5 font-mono', style:{color:'#475569'}}, cell.id.split('!')[1]),
-          el('td', {className:'px-4 py-2.5', style:{color:'#94a3b8', maxWidth:'140px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, cell.label),
-          el('td', {className:'px-4 py-2.5 font-mono', style:{color:'#f59e0b', maxWidth:'200px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, cell.formula?.raw),
-          el('td', {className:'px-4 py-2.5 text-right font-mono font-semibold', style:{color: valColor(val)}}, fmtVal(val, cell.data_type, cell.format_string))
-        );
-        tr.onmouseenter = () => tr.style.background = 'rgba(51,65,85,0.4)';
-        tr.onmouseleave = () => tr.style.background = i%2===0?'transparent':'rgba(30,41,59,0.5)';
-        tr.onclick = async () => {
-          setState({ selectedCell: cell, explanation: null, explaining: true });
-          try {
-            const exp = await explainCell(state.session.session_id, cell.id);
-            setState({ explanation: exp, explaining: false });
-          } catch {
-            setState({ explanation: { cell_id: cell.id, what_it_means: 'Backend not reachable — start the FastAPI server.', business_impact:'', sensitivity:'' }, explaining: false });
-          }
-        };
-        tbody.append(tr);
+    // ── Tab bar ────────────────────────────────────────────────────────────
+    const tabBar=h('div',{style:{
+      display:'flex',gap:'4px',borderBottom:'1px solid #1e293b',
+      marginBottom:'16px',paddingBottom:'0'
+    }});
+    const tabs=[{id:'all',label:'Tutte le metriche',icon:'📊'},...CAT_ORDER.map(c=>({
+      id:c,label:CAT_META[c].label,icon:CAT_META[c].icon,
+      count:byCategory[c].length,color:CAT_META[c].color
+    }))];
+
+    const tabEls={};
+    function switchTab(id){
+      activeTab=id;
+      Object.entries(tabEls).forEach(([tid,el])=>{
+        const active=tid===id;
+        const meta=CAT_META[tid];
+        el.style.color=active?(meta?.color||'#6366f1'):'#475569';
+        el.style.borderBottom=active?`2px solid ${meta?.color||'#6366f1'}`:'2px solid transparent';
+        el.style.background=active?`${meta?.color||'#6366f1'}12`:'transparent';
       });
-      table.append(tbody);
-      tableWrap.append(table);
-      sec.append(tableWrap); wrap.append(sec);
+      renderTabContent(id);
     }
 
-    container.append(wrap);
+    tabs.forEach(t=>{
+      const btn=h('button',{class:'btn',style:{
+        padding:'8px 14px',fontSize:'12px',fontWeight:600,
+        color:'#475569',borderBottom:'2px solid transparent',
+        borderRadius:'8px 8px 0 0',transition:'all .15s',
+        display:'flex',alignItems:'center',gap:'5px'
+      },onClick:()=>switchTab(t.id)});
+      btn.innerHTML=`<span style="font-size:13px">${t.icon}</span><span>${t.label}</span>`+
+        (t.count!=null?`<span style="background:#1e293b;color:#94a3b8;font-size:10px;padding:1px 6px;border-radius:999px">${t.count}</span>`:'');
+      tabBar.append(btn);
+      tabEls[t.id]=btn;
+    });
+    tabSection.append(tabBar);
+
+    // ── Tab content pane ───────────────────────────────────────────────────
+    const contentPane=h('div',{style:{display:'flex',flexDirection:'column',gap:'20px'}});
+    tabSection.append(contentPane);
+
+    function renderTabContent(tab){
+      contentPane.innerHTML='';
+      if(tab==='all'){
+        // Show all categories one below the other
+        CAT_ORDER.forEach(cat=>{
+          const items=byCategory[cat];
+          if(!items.length) return;
+          const meta=CAT_META[cat];
+          const sec=h('div',{style:{display:'flex',flexDirection:'column',gap:'10px'}});
+          sec.append(h('div',{style:{
+            display:'flex',alignItems:'center',gap:'8px',
+            paddingBottom:'8px',borderBottom:'1px solid #1e293b'
+          }},
+            h('span',{style:{fontSize:'15px'}},meta.icon),
+            h('span',{style:{fontSize:'11px',fontWeight:700,letterSpacing:'.06em',
+              textTransform:'uppercase',color:meta.color}},meta.label),
+            h('span',{style:{fontSize:'10px',color:'#334155',marginLeft:'4px'}},
+              `${items.length} indicatori`)
+          ));
+          const grid=h('div',{style:{
+            display:'grid',gap:'10px',
+            gridTemplateColumns:'repeat(auto-fill,minmax(190px,1fr))'
+          }});
+          items.forEach(k=>grid.append(kpiCard(k)));
+          sec.append(grid);
+          contentPane.append(sec);
+        });
+      } else {
+        const items=byCategory[tab]||[];
+        const meta=CAT_META[tab];
+        if(!items.length){
+          contentPane.append(h('div',{class:'card',style:{padding:'20px'}},
+            h('p',{style:{fontSize:'12px',color:'#475569',lineHeight:'1.7'}},
+              `⚠️ Nessuna metrica "${meta.label}" rilevata nel documento. `+
+              'Il sistema ricerca automaticamente questi valori nelle etichette delle celle. '+
+              'Controlla che il piano Excel contenga le voci corrispondenti.')));
+          return;
+        }
+        const grid=h('div',{style:{
+          display:'grid',gap:'10px',
+          gridTemplateColumns:'repeat(auto-fill,minmax(190px,1fr))'
+        }});
+        items.forEach(k=>grid.append(kpiCard(k)));
+        contentPane.append(grid);
+      }
+    }
+
+    // Activate default tab
+    switchTab('all');
+    main.append(tabSection);
+  } else {
+    main.append(h('div',{class:'card',style:{padding:'20px'}},
+      h('p',{style:{fontSize:'12px',color:'#475569',lineHeight:'1.7'}},
+        '⚠️  Nessuna metrica finanziaria rilevata automaticamente. '+
+        'Assicurati che le etichette delle celle nel tuo Excel contengano '+
+        'termini come "fatturato", "costi", "abbonamenti", "churn", "arpu" ecc.')));
   }
 
-  subscribe(render); render();
+  // ── Charts section ────────────────────────────────────────────────────────
+  const chartsSection=h('div',{style:{display:'flex',flexDirection:'column',gap:'10px'}});
+  chartsSection.append(h('p',{class:'section-title'},'📈  Analisi Temporale'));
+  const chartsContainer=h('div');
+  chartsSection.append(chartsContainer);
+  main.append(chartsSection);
+  setTimeout(()=>{
+    Object.values(_charts).forEach(c=>c.destroy&&c.destroy());
+    Object.keys(_charts).forEach(k=>delete _charts[k]);
+    buildAllCharts(chartsContainer);
+  },80);
+
+  // ── Auto insights ─────────────────────────────────────────────────────────
+  const insights=buildInsights(kpis);
+  if(insights) main.append(insights);
+
+  body.append(sidebar,main);
+  return wrap;
 }
 
-// ─── Bootstrap ────────────────────────────────────────────────────────────────
-const app = document.getElementById('app');
-app.style.cssText = 'display:flex; height:100vh; overflow:hidden;';
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-generated insights
+// ─────────────────────────────────────────────────────────────────────────────
+function buildInsights(kpis){
+  const notes=[];
+  const byId=Object.fromEntries(kpis.map(k=>[k.id,k.value]));
 
-const sidebar = buildSidebar();
-const mainArea = el('main', {style:{flex:'1', overflowY:'auto'}});
+  // LTV/CAC
+  if(byId.ltv_cac!=null){
+    const v=byId.ltv_cac;
+    if(v>=3) notes.push({icon:'✅',color:'#10b981',text:`LTV/CAC = ${v.toFixed(2)}x — ottimo. Per ogni € speso in acquisizione ne recuperi ${v.toFixed(1)}x nel ciclo di vita del cliente.`});
+    else if(v>=1) notes.push({icon:'⚠️',color:'#f59e0b',text:`LTV/CAC = ${v.toFixed(2)}x — sotto il target 3x. Considera di ridurre il CAC o aumentare il prezzo/retention.`});
+    else notes.push({icon:'🔴',color:'#f43f5e',text:`LTV/CAC = ${v.toFixed(2)}x — critico. Stai perdendo denaro su ogni cliente acquisito.`});
+  }
 
-app.append(sidebar, mainArea);
-buildDashboard(mainArea);
+  // Cash runway
+  if(byId.cash_runway!=null){
+    const v=byId.cash_runway;
+    if(v<6) notes.push({icon:'🔴',color:'#f43f5e',text:`Runway di soli ${v.toFixed(0)} mesi — zona critica. Serve raccolta fondi immediata o riduzione del burn rate.`});
+    else if(v<12) notes.push({icon:'⚠️',color:'#f59e0b',text:`Runway di ${v.toFixed(0)} mesi — sotto i 12 mesi. Pianifica il prossimo round di finanziamento.`});
+    else notes.push({icon:'✅',color:'#10b981',text:`Runway di ${v.toFixed(0)} mesi — situazione di cassa sana.`});
+  }
+
+  // Gross margin
+  if(byId.gross_margin_pct!=null){
+    const v=byId.gross_margin_pct;
+    if(v>70) notes.push({icon:'✅',color:'#10b981',text:`Gross Margin ${v.toFixed(1)}% — eccellente per un modello SaaS. Alta scalabilità.`});
+    else if(v>40) notes.push({icon:'📊',color:'#6366f1',text:`Gross Margin ${v.toFixed(1)}% — nella norma. Spazio per migliorare ottimizzando i costi diretti.`});
+    else if(v>0) notes.push({icon:'⚠️',color:'#f59e0b',text:`Gross Margin ${v.toFixed(1)}% — basso. Valuta aumenti di prezzo o riduzione dei costi del servizio.`});
+    else notes.push({icon:'🔴',color:'#f43f5e',text:`Gross Margin ${v.toFixed(1)}% — negativo. I costi diretti superano i ricavi.`});
+  }
+
+  // NRR
+  if(byId.nrr!=null){
+    const v=byId.nrr;
+    if(v>=120) notes.push({icon:'🚀',color:'#6366f1',text:`NRR ${v.toFixed(1)}% — eccellente! Cresci senza aggiungere nuovi clienti grazie all'espansione della base esistente.`});
+    else if(v>=100) notes.push({icon:'✅',color:'#10b981',text:`NRR ${v.toFixed(1)}% — stabile, la base clienti non si erode.`});
+    else notes.push({icon:'⚠️',color:'#f59e0b',text:`NRR ${v.toFixed(1)}% — sotto il 100%. Stai perdendo ricavi dalla base clienti esistente.`});
+  }
+
+  // EBITDA margin
+  if(byId.ebitda_margin!=null){
+    const v=byId.ebitda_margin;
+    if(v>20) notes.push({icon:'✅',color:'#10b981',text:`EBITDA Margin ${v.toFixed(1)}% — operativamente profittevole.`});
+    else if(v>0) notes.push({icon:'📊',color:'#06b6d4',text:`EBITDA Margin ${v.toFixed(1)}% — marginalmente positivo. Focus sulla leva operativa.`});
+    else notes.push({icon:'⚠️',color:'#f59e0b',text:`EBITDA Margin ${v.toFixed(1)}% — ancora in perdita operativa. Monitora il burn rate.`});
+  }
+
+  // Revenue CAGR
+  if(byId.cagr_revenue!=null){
+    const v=byId.cagr_revenue;
+    if(v>100) notes.push({icon:'🚀',color:'#6366f1',text:`CAGR Ricavi ${v.toFixed(1)}% — crescita esplosiva. Assicurati che l'infrastruttura scala di conseguenza.`});
+    else if(v>30) notes.push({icon:'📈',color:'#10b981',text:`CAGR Ricavi ${v.toFixed(1)}% — crescita solida, attrattiva per investitori.`});
+    else if(v>0) notes.push({icon:'📊',color:'#475569',text:`CAGR Ricavi ${v.toFixed(1)}% — crescita moderata. Valuta levette di accelerazione.`});
+  }
+
+  if(notes.length===0) return null;
+
+  const sec=h('div',{style:{display:'flex',flexDirection:'column',gap:'12px'}});
+  sec.append(h('p',{class:'section-title'},'🔍  Analisi Automatica'));
+  const list=h('div',{style:{display:'flex',flexDirection:'column',gap:'8px'}});
+  notes.forEach(n=>{
+    list.append(h('div',{class:'card',style:{
+      padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:'12px',
+      borderLeft:`3px solid ${n.color}`
+    }},
+      h('span',{style:{fontSize:'16px',flexShrink:0,marginTop:'1px'}},n.icon),
+      h('p',{style:{fontSize:'12px',lineHeight:'1.7',color:'#94a3b8'}},n.text)
+    ));
+  });
+  sec.append(list);
+  return sec;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Root render
+// ─────────────────────────────────────────────────────────────────────────────
+const app=document.getElementById('app');
+
+function render(){
+  // Determine layout
+  let layout;
+  if(!S.session){
+    // Full-page empty/upload state
+    const page=h('div',{style:{flex:'1',display:'flex',flexDirection:'column',
+      alignItems:'center',justifyContent:'center',padding:'32px',position:'relative'}});
+
+    // Top-left logo
+    const logo=h('div',{style:{
+      position:'absolute',top:'16px',left:'24px',
+      display:'flex',alignItems:'center',gap:'8px'
+    }},
+      h('span',{style:{fontSize:'16px'}},'📊'),
+      h('span',{style:{fontSize:'13px',fontWeight:700,color:'#475569'}},
+        'Architetto Gestionale')
+    );
+    page.append(logo);
+    page.append(emptyState());
+
+    // Upload zone centered
+    const uploadWrap=h('div',{style:{width:'320px',marginTop:'8px'}});
+    const uz=h('div',{class:'',style:{
+      background:'#0f172a',border:'1px solid #1e293b',borderRadius:'14px',padding:'24px'
+    }});
+    const inp=h('input',{type:'file',accept:'.xlsx,.xls',style:{display:'none'}});
+    inp.onchange=e=>{const f=e.target.files?.[0];if(f)doUpload(f);inp.value='';};
+    let drag=false;
+    const drop=h('div',{style:{
+      borderRadius:'10px',border:`2px dashed ${S.loading?'#6366f1':'#1e293b'}`,
+      padding:'24px 16px',textAlign:'center',cursor:'pointer',transition:'all .2s',
+    },onClick:()=>inp.click()});
+    drop.ondragover=e=>{e.preventDefault();drop.style.borderColor='#6366f1';drop.style.background='rgba(99,102,241,.06)';};
+    drop.ondragleave=()=>{drop.style.borderColor='#1e293b';drop.style.background='';};
+    drop.ondrop=e=>{e.preventDefault();drop.style.borderColor='#1e293b';drop.style.background='';
+      const f=e.dataTransfer.files[0];if(f)doUpload(f);};
+    if(S.loading){
+      drop.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div class="spin" style="width:24px;height:24px;border-radius:50%;border:2px solid #6366f1;border-top-color:transparent"></div>
+        <p style="font-size:13px;color:#94a3b8">Analisi in corso…</p>
+        <p style="font-size:11px;color:#334155">Estrazione KPI e time series</p></div>`;
+    } else {
+      drop.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+        <span style="font-size:32px">📂</span>
+        <p style="font-size:14px;font-weight:600;color:#e2e8f0">Trascina il tuo Excel qui</p>
+        <p style="font-size:11px;color:#475569">.xlsx o .xls · max 10 MB</p></div>`;
+    }
+    uz.append(drop,inp);
+    if(S.error) uz.append(h('div',{style:{
+      marginTop:'12px',background:'rgba(244,63,94,.1)',color:'#f43f5e',
+      borderRadius:'8px',padding:'10px 12px',fontSize:'12px',lineHeight:'1.5'
+    }},`❌ ${S.error}`));
+    uploadWrap.append(uz);
+    page.append(uploadWrap);
+
+    layout=page;
+  } else {
+    layout=buildDashboard(S.session);
+  }
+
+  app.innerHTML='';
+  app.append(layout);
+}
+
+S.sub(render);
+render();
 </script>
 </body>
 </html>
